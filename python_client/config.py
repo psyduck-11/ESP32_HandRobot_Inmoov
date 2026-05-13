@@ -11,7 +11,7 @@ Adjust these values to match your hardware setup.
 COMM_MODE = "serial"
 
 # --- Serial Settings (for wired USB connection) ---
-SERIAL_PORT = "COM5"        # Change to your ESP32's COM port (check Device Manager)
+SERIAL_PORT = "COM6"        # Change to your ESP32's COM port (check Device Manager)
 SERIAL_BAUD = 115200
 
 # --- WiFi Settings (for wireless TCP connection) ---
