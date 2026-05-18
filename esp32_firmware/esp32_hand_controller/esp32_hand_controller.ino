@@ -52,13 +52,15 @@ unsigned long lastCurrentRead = 0;
 #endif
 
 // ---- Serial Input Buffer ----
-String serialBuffer = "";
+char serialBuffer[128];
+int serialBufferIdx = 0;
 
 // ---- WiFi TCP ----
 #if ENABLE_WIFI
 WiFiServer tcpServer(TCP_PORT);
 WiFiClient tcpClient;
-String wifiBuffer = "";
+char wifiBuffer[128];
+int wifiBufferIdx = 0;
 bool wifiConnected = false;
 #endif
 
@@ -67,19 +69,11 @@ bool wifiConnected = false;
 // ============================================================
 
 /**
- * Convert angle (0-180°) to PCA9685 PWM tick value.
- */
-int angleToPWM(int angle) {
-  angle = constrain(angle, ANGLE_MIN, ANGLE_MAX);
-  return map(angle, 0, 180, SERVO_MIN_TICK, SERVO_MAX_TICK);
-}
-
-/**
  * Set a servo to a specific angle immediately (no smoothing).
+ * Optimized to compute PWM inline using pure integer arithmetic.
  */
-void setServoImmediate(int channel, int angle) {
-  angle = constrain(angle, ANGLE_MIN, ANGLE_MAX);
-  int pwmVal = angleToPWM(angle);
+inline void setServoImmediate(int channel, int angle) {
+  int pwmVal = (angle * (SERVO_MAX_TICK - SERVO_MIN_TICK)) / 180 + SERVO_MIN_TICK;
   pwm.setPWM(channel, 0, pwmVal);
 }
 
@@ -97,40 +91,39 @@ void updateServos() {
       effectiveTarget = maxServoAngle[i];
     }
 
-    // Skip if stall was detected on this servo
-    if (stallDetected[i]) {
+    // Fast-path skip: don't evaluate if already at target or stalled
+    if (stallDetected[i] || currentAngle[i] == effectiveTarget) {
       continue;
     }
 
-    if (currentAngle[i] != effectiveTarget) {
-      int diff = effectiveTarget - currentAngle[i];
-      bool isClosing = (diff > 0); // Closing = increasing angle
+    int diff = effectiveTarget - currentAngle[i];
 
-      int speedLimit = SERVO_SPEED_LIMIT;
+#if SERVO_SPEED_LIMIT > 0
+    int speedLimit = SERVO_SPEED_LIMIT;
 
-      // Apply compliance when closing (not when opening)
-      if (isClosing && COMPLIANCE_ZONE_DEG > 0 && speedLimit > 0) {
-        int distToTarget = abs(effectiveTarget - currentAngle[i]);
-        if (distToTarget <= COMPLIANCE_ZONE_DEG) {
-          // Linearly reduce speed as we approach the target
-          // At edge of zone: full speed. At target: COMPLIANCE_MIN_SPEED
-          float factor = (float)distToTarget / (float)COMPLIANCE_ZONE_DEG;
-          speedLimit =
-              max(COMPLIANCE_MIN_SPEED,
-                  (int)(COMPLIANCE_MIN_SPEED +
-                        factor * (SERVO_SPEED_LIMIT - COMPLIANCE_MIN_SPEED)));
-        }
+    // Apply compliance when closing (diff > 0)
+    if (diff > 0 && COMPLIANCE_ZONE_DEG > 0) {
+      if (diff <= COMPLIANCE_ZONE_DEG) {
+        // Linearly reduce speed as we approach the target
+        int scaledSpeed = COMPLIANCE_MIN_SPEED + 
+          (diff * (SERVO_SPEED_LIMIT - COMPLIANCE_MIN_SPEED)) / COMPLIANCE_ZONE_DEG;
+        speedLimit = scaledSpeed > COMPLIANCE_MIN_SPEED ? scaledSpeed : COMPLIANCE_MIN_SPEED;
       }
-
-      // Apply speed limit
-      if (speedLimit > 0 && abs(diff) > speedLimit) {
-        diff = (diff > 0) ? speedLimit : -speedLimit;
-      }
-
-      currentAngle[i] += diff;
-      currentAngle[i] = constrain(currentAngle[i], ANGLE_MIN, ANGLE_MAX);
-      setServoImmediate(servoChannels[i], currentAngle[i]);
     }
+
+    // Apply speed limit
+    if (abs(diff) > speedLimit) {
+      diff = (diff > 0) ? speedLimit : -speedLimit;
+    }
+#endif
+
+    currentAngle[i] += diff;
+    
+    // Failsafe bound check
+    if (currentAngle[i] < ANGLE_MIN) currentAngle[i] = ANGLE_MIN;
+    else if (currentAngle[i] > ANGLE_MAX) currentAngle[i] = ANGLE_MAX;
+    
+    setServoImmediate(servoChannels[i], currentAngle[i]);
   }
 }
 
@@ -169,19 +162,21 @@ void checkCurrentStall() {
   if (adcVal > CURRENT_STALL_ADC) {
     stallCounter++;
     if (stallCounter >= STALL_DEBOUNCE_COUNT) {
-      // Stall detected! Back off all servos that are closing
-      Serial.println("[GRIP] Stall detected! Current ADC: " + String(adcVal) +
-                     " — backing off");
+      // Stall detected! Back off all servos to release grip
+      Serial.print("[GRIP] Stall detected! Current ADC: ");
+      Serial.print(adcVal);
+      Serial.println(" — backing off");
       for (int i = 0; i < NUM_SERVOS; i++) {
-        if (currentAngle[i] > ANGLE_MIN + STALL_BACKOFF_DEG) {
-          targetAngle[i] = currentAngle[i] - STALL_BACKOFF_DEG;
+        if (currentAngle[i] > ANGLE_MIN) {
+          int backoffTarget = currentAngle[i] - STALL_BACKOFF_DEG;
+          targetAngle[i] = backoffTarget > ANGLE_MIN ? backoffTarget : ANGLE_MIN;
           stallDetected[i] = true;
         }
       }
       stallCounter = 0;
     }
   } else {
-    stallCounter = max(0, stallCounter - 1); // Decay counter
+    if (stallCounter > 0) stallCounter--; // Fast decay without macro overhead
   }
 }
 #endif
@@ -191,56 +186,60 @@ void checkCurrentStall() {
 // ============================================================
 
 /**
- * Process a complete command string.
- * Returns a response string (may be empty).
+ * Process a complete command string and print response to output.
+ * Uses zero dynamic memory allocation.
  */
-String processCommand(String cmd) {
-  cmd.trim();
-
-  if (cmd.length() == 0) {
-    return "";
+void processCommand(char* cmd, Print& output) {
+  // Trim trailing newline/cr/spaces
+  int len = strlen(cmd);
+  while (len > 0 && (cmd[len - 1] == '\n' || cmd[len - 1] == '\r' || cmd[len - 1] == ' ')) {
+    cmd[len - 1] = '\0';
+    len--;
+  }
+  
+  // Trim leading space
+  while (*cmd == ' ') {
+    cmd++;
   }
 
-  char type = cmd.charAt(0);
+  if (strlen(cmd) == 0) {
+    return;
+  }
+
+  char type = cmd[0];
+  char* data = cmd + 1;
 
   switch (type) {
   case 'F':
   case 'f': {
     // F<thumb>,<index>,<middle>,<ring>,<pinky>,<wrist>
-    String data = cmd.substring(1);
     int vals[NUM_SERVOS];
     int idx = 0;
-
-    while (data.length() > 0 && idx < NUM_SERVOS) {
-      int commaPos = data.indexOf(',');
-      if (commaPos == -1) {
-        vals[idx] = data.toInt();
-        data = "";
-      } else {
-        vals[idx] = data.substring(0, commaPos).toInt();
-        data = data.substring(commaPos + 1);
-      }
-      idx++;
+    char* token = strtok(data, ",");
+    while (token != NULL && idx < NUM_SERVOS) {
+      vals[idx++] = atoi(token);
+      token = strtok(NULL, ",");
     }
 
-    if (idx >= NUM_SERVOS) {
+    if (idx == NUM_SERVOS) {
       for (int i = 0; i < NUM_SERVOS; i++) {
         targetAngle[i] = constrain(vals[i], ANGLE_MIN, ANGLE_MAX);
       }
-      return "OK\n";
+      output.print("OK\n");
     } else {
-      return "E:INVALID_ARGS\n";
+      output.print("E:INVALID_ARGS\n");
     }
+    break;
   }
 
   case 'C':
   case 'c': {
     // C<channel>,<angle>
-    String data = cmd.substring(1);
-    int commaPos = data.indexOf(',');
-    if (commaPos > 0) {
-      int ch = data.substring(0, commaPos).toInt();
-      int angle = data.substring(commaPos + 1).toInt();
+    char* comma = strchr(data, ',');
+    if (comma != NULL) {
+      *comma = '\0';
+      int ch = atoi(data);
+      int angle = atoi(comma + 1);
       angle = constrain(angle, ANGLE_MIN, ANGLE_MAX);
 
       if (ch >= 0 && ch < 16) {
@@ -253,42 +252,50 @@ String processCommand(String cmd) {
             break;
           }
         }
-        return "OK\n";
+        output.print("OK\n");
+        return;
       }
     }
-    return "E:INVALID_CHANNEL\n";
+    output.print("E:INVALID_CHANNEL\n");
+    break;
   }
 
   case 'P':
   case 'p':
-    return "PONG\n";
+    output.print("PONG\n");
+    break;
 
   case 'G':
   case 'g': {
     // G<strength> — set grip strength (0-100)
-    int str = cmd.substring(1).toInt();
+    int str = atoi(data);
     gripStrength = constrain(str, 0, 100);
     updateGripLimits();
-    Serial.println("[GRIP] Strength set to " + String(gripStrength) + "%");
-    return "OK:G" + String(gripStrength) + "\n";
+    Serial.print("[GRIP] Strength set to ");
+    Serial.print(gripStrength);
+    Serial.println("%");
+    
+    char resp[16];
+    snprintf(resp, sizeof(resp), "OK:G%d\n", gripStrength);
+    output.print(resp);
+    break;
   }
 
   case 'S':
   case 's': {
     // Return current angles and grip strength
-    String resp = "A";
-    for (int i = 0; i < NUM_SERVOS; i++) {
-      resp += String(currentAngle[i]);
-      if (i < NUM_SERVOS - 1)
-        resp += ",";
-    }
-    resp += ",G" + String(gripStrength);
-    resp += "\n";
-    return resp;
+    char resp[64];
+    snprintf(resp, sizeof(resp), "A%d,%d,%d,%d,%d,%d,G%d\n", 
+             currentAngle[0], currentAngle[1], currentAngle[2],
+             currentAngle[3], currentAngle[4], currentAngle[5],
+             gripStrength);
+    output.print(resp);
+    break;
   }
 
   default:
-    return "E:UNKNOWN_CMD\n";
+    output.print("E:UNKNOWN_CMD\n");
+    break;
   }
 }
 
@@ -299,18 +306,17 @@ void handleSerial() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
-      if (serialBuffer.length() > 0) {
-        String response = processCommand(serialBuffer);
-        if (response.length() > 0) {
-          Serial.print(response);
-        }
-        serialBuffer = "";
+      if (serialBufferIdx > 0) {
+        serialBuffer[serialBufferIdx] = '\0'; // Null terminate
+        processCommand(serialBuffer, Serial);
+        serialBufferIdx = 0;
       }
     } else {
-      serialBuffer += c;
-      // Safety: prevent buffer overflow
-      if (serialBuffer.length() > 100) {
-        serialBuffer = "";
+      if (serialBufferIdx < (int)(sizeof(serialBuffer) - 1)) {
+        serialBuffer[serialBufferIdx++] = c;
+      } else {
+        // Buffer overflow: clear buffer
+        serialBufferIdx = 0;
       }
     }
   }
@@ -321,36 +327,45 @@ void handleSerial() {
  * Read and process data from WiFi TCP client.
  */
 void handleWiFi() {
-  // Check for new client
-  if (!tcpClient || !tcpClient.connected()) {
-    tcpClient = tcpServer.available();
-    if (tcpClient) {
-      Serial.println("[WIFI] Client connected: " +
-                     tcpClient.remoteIP().toString());
+  // Check for new client connection
+  if (tcpServer.hasClient()) {
+    if (!tcpClient || !tcpClient.connected()) {
+      if (tcpClient) tcpClient.stop(); // close previous if any
+      tcpClient = tcpServer.available();
+      tcpClient.setNoDelay(true); // Disable Nagle's algorithm for lowest possible latency
+      Serial.print("[WIFI] Client connected: ");
+      Serial.println(tcpClient.remoteIP());
       wifiConnected = true;
-      wifiBuffer = "";
-    } else if (wifiConnected) {
-      Serial.println("[WIFI] Client disconnected");
-      wifiConnected = false;
+      wifiBufferIdx = 0;
+    } else {
+      // Reject new client if one is already actively connected
+      WiFiClient rejectClient = tcpServer.available();
+      rejectClient.stop();
     }
   }
 
+  // Handle client disconnection
+  if (wifiConnected && tcpClient && !tcpClient.connected()) {
+    Serial.println("[WIFI] Client disconnected");
+    tcpClient.stop();
+    wifiConnected = false;
+  }
+
   // Read data from connected client
-  if (tcpClient && tcpClient.connected()) {
+  if (tcpClient && (tcpClient.connected() || tcpClient.available())) {
     while (tcpClient.available()) {
       char c = (char)tcpClient.read();
       if (c == '\n' || c == '\r') {
-        if (wifiBuffer.length() > 0) {
-          String response = processCommand(wifiBuffer);
-          if (response.length() > 0) {
-            tcpClient.print(response);
-          }
-          wifiBuffer = "";
+        if (wifiBufferIdx > 0) {
+          wifiBuffer[wifiBufferIdx] = '\0';
+          processCommand(wifiBuffer, tcpClient);
+          wifiBufferIdx = 0;
         }
       } else {
-        wifiBuffer += c;
-        if (wifiBuffer.length() > 100) {
-          wifiBuffer = "";
+        if (wifiBufferIdx < (int)(sizeof(wifiBuffer) - 1)) {
+          wifiBuffer[wifiBufferIdx++] = c;
+        } else {
+          wifiBufferIdx = 0; // Overflow handling
         }
       }
     }
@@ -406,29 +421,34 @@ void setup() {
 
   // --- I2C & PCA9685 ---
   Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(400000); // Optimize I2C speed to 400kHz for faster PWM updates
   pwm.begin();
   pwm.setPWMFreq(PWM_FREQ);
   delay(10);
-  Serial.println("[OK] PCA9685 initialized (addr 0x" +
-                 String(PCA9685_ADDR, HEX) + ")");
+  Serial.print("[OK] PCA9685 initialized (addr 0x");
+  Serial.print(PCA9685_ADDR, HEX);
+  Serial.println(")");
 
   // Initialize all servos to 90° (neutral)
   for (int i = 0; i < NUM_SERVOS; i++) {
     setServoImmediate(servoChannels[i], 90);
-    Serial.println("[OK] Servo CH" + String(servoChannels[i]) + " → 90°");
+    Serial.print("[OK] Servo CH");
+    Serial.print(servoChannels[i]);
+    Serial.println(" -> 90");
   }
 
   // Initialize grip protection
   gripStrength = 75; // Default: NORMAL mode
   updateGripLimits();
-  Serial.println(
-      "[OK] Grip protection active (strength: " + String(gripStrength) + "%)");
+  Serial.print("[OK] Grip protection active (strength: ");
+  Serial.print(gripStrength);
+  Serial.println("%)");
 
 #if ENABLE_CURRENT_SENSE
   pinMode(CURRENT_SENSE_PIN, INPUT);
   analogSetAttenuation(ADC_11db); // Full 0-3.3V range
-  Serial.println("[OK] Current sensing enabled on GPIO " +
-                 String(CURRENT_SENSE_PIN));
+  Serial.print("[OK] Current sensing enabled on GPIO ");
+  Serial.println(CURRENT_SENSE_PIN);
 #else
   Serial.println("[INFO] Current sensing disabled (software compliance only)");
 #endif
@@ -451,9 +471,10 @@ void setup() {
     Serial.print("[WIFI] Connected! IP: ");
     Serial.println(WiFi.localIP());
     tcpServer.begin();
-    Serial.println("[WIFI] TCP server started on port " + String(TCP_PORT));
-    Serial.println("[WIFI] Set ESP32_IP in Python config.py to: " +
-                   WiFi.localIP().toString());
+    Serial.print("[WIFI] TCP server started on port ");
+    Serial.println(TCP_PORT);
+    Serial.print("[WIFI] Set ESP32_IP in Python config.py to: ");
+    Serial.println(WiFi.localIP());
   } else {
     Serial.println();
     Serial.println("[WIFI] Connection failed — continuing with Serial only");
@@ -466,8 +487,11 @@ void setup() {
   Serial.println("[READY] Listening for commands...");
   Serial.println(
       "  Protocol: F<t>,<i>,<m>,<r>,<p>,<w>  C<ch>,<angle>  G<str>  P  S");
-  Serial.println("  Grip: strength=" + String(gripStrength) +
-                 "% compliance=" + String(COMPLIANCE_ZONE_DEG) + "deg");
+  Serial.print("  Grip: strength=");
+  Serial.print(gripStrength);
+  Serial.print("% compliance=");
+  Serial.print(COMPLIANCE_ZONE_DEG);
+  Serial.println("deg");
   Serial.println("========================================");
 }
 
