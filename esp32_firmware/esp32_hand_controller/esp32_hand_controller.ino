@@ -1,52 +1,56 @@
 /*
- * reset_servo.ino
- * ────────────────────────────────────────────────────────────────────
- * Arduino IDE sketch for ESP32 DevKit + PCA9685 16-channel PWM driver.
- * Resets 6 servos (channels 0-5) to a demanded angle.
+ * ============================================================
+ *  InMoov Hand Controller — ESP32 Firmware
+ *  Controls 6x MG996R servos via PCA9685 I2C PWM driver.
+ *  Accepts commands over USB Serial AND WiFi TCP.
  *
- * Required library:
- *   Adafruit PWM Servo Driver Library
- *   → Install via: Sketch > Include Library > Manage Libraries…
- *     Search "Adafruit PWM Servo Driver" and install.
+ *  Protocol:
+ *    F<t>,<i>,<m>,<r>,<p>,<w>\n  — Set all 6 servos (0-180°)
+ *    C<ch>,<angle>\n              — Set single channel
+ *    G<strength>\n                — Set grip strength (0-100%)
+ *    P\n                          — Ping (replies PONG)
+ *    S\n                          — Status (replies current angles + grip)
  *
- * Wiring (ESP32 ↔ PCA9685):
- *   ESP32 GPIO21 (SDA)  →  PCA9685 SDA
- *   ESP32 GPIO22 (SCL)  →  PCA9685 SCL
- *   ESP32 3.3V          →  PCA9685 VCC
- *   ESP32 GND           →  PCA9685 GND
- *   5V 20A Adapter   →  PCA9685 V+ (servo power)
- *
- * Board:
- *   Select "ESP32 Dev Module" in Arduino IDE.
- * ────────────────────────────────────────────────────────────────────
+ *  Hardware:
+ *    ESP32 DevKit 30P (CH340, Type-C)
+ *    PCA9685 16-ch PWM driver on I2C (SDA=21, SCL=22)
+ *    6x MG996R servos on channels 0-5
+ *    External 5V 10A+ power supply on PCA9685 V+
+ * ============================================================
  */
 
-#include <Wire.h>
+#include "config.h"
 #include <Adafruit_PWMServoDriver.h>
+#include <Wire.h>
 
-// ======================== USER CONFIGURATION ========================
+#if ENABLE_WIFI
+#include <WiFi.h>
+#endif
 
-#define DEMANDED_DEGREE   0        // Target angle for all servos (0-180)
+// ---- PCA9685 Driver ----
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_ADDR);
 
-#define PCA9685_ADDR      0x40      // Default I2C address
-#define SDA_PIN           21        // ESP32 default SDA
-#define SCL_PIN           22        // ESP32 default SCL
+// ---- Servo State ----
+int currentAngle[NUM_SERVOS] = {90, 90, 90, 90, 90, 90};
+int targetAngle[NUM_SERVOS] = {90, 90, 90, 90, 90, 90};
+const int servoChannels[NUM_SERVOS] = {CH_THUMB, CH_INDEX, CH_MIDDLE,
+                                       CH_RING,  CH_PINKY, CH_WRIST};
 
-#define NUM_SERVOS        6         // Number of servos to control
-const uint8_t SERVO_CHANNELS[NUM_SERVOS] = {0, 1, 2, 3, 4, 5};
+// ---- Timing ----
+unsigned long lastUpdateTime = 0;
+unsigned long lastLedToggle = 0;
+bool ledState = false;
 
-// Standard servo pulse widths (microseconds) — adjust for your servos
-#define SERVO_MIN_US      500       // Pulse width at 0°
-#define SERVO_MAX_US      2500      // Pulse width at 180°
-#define SERVO_FREQ_HZ     50        // 50 Hz = 20 ms period (standard)
+// ---- Grip Protection ----
+int gripStrength = 75;         // 0-100% — limits max closing angle
+int maxServoAngle[NUM_SERVOS]; // Computed max angle per servo based on grip
+bool stallDetected[NUM_SERVOS] = {false};
 
-#define STAGGER_DELAY_MS  150       // Delay between each servo to reduce inrush
+#if ENABLE_CURRENT_SENSE
+int stallCounter = 0; // Debounce counter for stall detection
+unsigned long lastCurrentRead = 0;
+#endif
 
-<<<<<<< HEAD
-// ======================== GLOBALS ==================================
-
-Adafruit_PWMServoDriver pca = Adafruit_PWMServoDriver(PCA9685_ADDR);
-=======
 // ---- Serial Input Buffer ----
 char serialBuffer[128];
 int serialBufferIdx = 0;
@@ -59,52 +63,28 @@ char wifiBuffer[128];
 int wifiBufferIdx = 0;
 bool wifiConnected = false;
 #endif
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
 
-// ======================== HELPER FUNCTIONS =========================
-
-/**
-<<<<<<< HEAD
- * Convert an angle (0-180°) to a 12-bit PCA9685 tick count.
- */
-uint16_t angleToPWM(float angle) {
-  angle = constrain(angle, 0.0f, 180.0f);
-
-  // Map angle to pulse width in microseconds
-  float pulseUs = SERVO_MIN_US + (SERVO_MAX_US - SERVO_MIN_US) * (angle / 180.0f);
-
-  // Convert microseconds to 12-bit ticks
-  // Period at 50 Hz = 20 000 µs → 4096 ticks
-  float periodUs = 1000000.0f / (float)SERVO_FREQ_HZ;
-  uint16_t ticks = (uint16_t)(pulseUs / periodUs * 4096.0f + 0.5f);
-
-  return constrain(ticks, (uint16_t)0, (uint16_t)4095);
-}
+// ============================================================
+//  UTILITY FUNCTIONS
+// ============================================================
 
 /**
- * Return pulse width in µs for a given angle (for display purposes).
- */
-float angleToPulseUs(float angle) {
-  angle = constrain(angle, 0.0f, 180.0f);
-  return SERVO_MIN_US + (SERVO_MAX_US - SERVO_MIN_US) * (angle / 180.0f);
-=======
  * Set a servo to a specific angle immediately (no smoothing).
  * Optimized to compute PWM inline using pure integer arithmetic.
  */
 inline void setServoImmediate(int channel, int angle) {
   int pwmVal = (angle * (SERVO_MAX_TICK - SERVO_MIN_TICK)) / 180 + SERVO_MIN_TICK;
   pwm.setPWM(channel, 0, pwmVal);
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
 }
 
 /**
- * Check whether a channel is in the allowed SERVO_CHANNELS list.
+ * Update servo positions with smooth interpolation and compliance.
+ * Compliance: when a servo is closing (increasing angle) and within
+ * COMPLIANCE_ZONE_DEG of its target, speed is progressively reduced.
+ * This creates a "soft approach" that prevents sudden force on objects.
  */
-bool isValidChannel(uint8_t ch) {
+void updateServos() {
   for (int i = 0; i < NUM_SERVOS; i++) {
-<<<<<<< HEAD
-    if (SERVO_CHANNELS[i] == ch) return true;
-=======
     // Apply grip strength limit: cap target angle
     int effectiveTarget = targetAngle[i];
     if (effectiveTarget > maxServoAngle[i]) {
@@ -144,58 +124,27 @@ bool isValidChannel(uint8_t ch) {
     else if (currentAngle[i] > ANGLE_MAX) currentAngle[i] = ANGLE_MAX;
     
     setServoImmediate(servoChannels[i], currentAngle[i]);
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
   }
-  return false;
 }
 
-/**
- * Move a single servo to the specified angle.
- */
-void resetSingleServo(uint8_t ch, float angle) {
-  uint16_t pwmTicks = angleToPWM(angle);
-  float pulseUs     = angleToPulseUs(angle);
-
-  pca.setPWM(ch, 0, pwmTicks);
-
-  Serial.print("    CH");
-  Serial.print(ch);
-  Serial.print(" -> ");
-  Serial.print(angle, 1);
-  Serial.print("°  (");
-  Serial.print(pulseUs, 0);
-  Serial.println(" µs)");
-}
+// ============================================================
+//  GRIP PROTECTION
+// ============================================================
 
 /**
- * Reset all servos to the specified angle.
+ * Recalculate max allowed angle for each servo based on gripStrength.
+ * gripStrength=100 means full range, 50 means only half range.
  */
-void resetAllServos(float angle) {
-  float pulseUs = angleToPulseUs(angle);
-
-  Serial.println();
-  Serial.print(">>> Resetting ALL ");
-  Serial.print(NUM_SERVOS);
-  Serial.print(" servos to ");
-  Serial.print(angle, 1);
-  Serial.print("°  (pulse ");
-  Serial.print(pulseUs, 0);
-  Serial.println(" µs)");
-  Serial.println();
-
+void updateGripLimits() {
   for (int i = 0; i < NUM_SERVOS; i++) {
-    resetSingleServo(SERVO_CHANNELS[i], angle);
-    delay(STAGGER_DELAY_MS);
+    // Map grip strength to max angle
+    // At 100%: ANGLE_MAX (full range). At 0%: ANGLE_MIN (can't close at all).
+    maxServoAngle[i] = map(gripStrength, 0, 100, ANGLE_MIN, ANGLE_MAX);
+    // Clear stall flag when grip changes
+    stallDetected[i] = false;
   }
-
-  Serial.println();
-  Serial.println("[DONE] All servos set.");
-  Serial.println();
 }
 
-<<<<<<< HEAD
-// ======================== SETUP ====================================
-=======
 #if ENABLE_CURRENT_SENSE
 /**
  * Read current from ADC and detect stall condition.
@@ -455,42 +404,21 @@ void updateLED() {
 // ============================================================
 //  SETUP & LOOP
 // ============================================================
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial) { delay(10); }
+  // --- Serial ---
+  Serial.begin(SERIAL_BAUD);
+  delay(500);
   Serial.println();
   Serial.println("========================================");
-  Serial.println("  ESP32 + PCA9685  Servo Reset Utility  ");
+  Serial.println("  InMoov Hand Controller v1.0");
+  Serial.println("  ESP32 + PCA9685 + 6x MG996R");
   Serial.println("========================================");
 
-  // Initialise I2C with custom pins (ESP32)
-  Wire.begin(SDA_PIN, SCL_PIN);
+  // --- LED ---
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-<<<<<<< HEAD
-  // Scan for PCA9685
-  Wire.beginTransmission(PCA9685_ADDR);
-  uint8_t error = Wire.endTransmission();
-  if (error != 0) {
-    Serial.print("[ERROR] PCA9685 not found at 0x");
-    Serial.print(PCA9685_ADDR, HEX);
-    Serial.println("!");
-    Serial.println("        Check wiring and power.");
-    Serial.println("        Halting.");
-    while (true) { delay(1000); }   // Halt
-  }
-  Serial.print("[OK] PCA9685 found at 0x");
-  Serial.println(PCA9685_ADDR, HEX);
-
-  // Initialise PCA9685
-  pca.begin();
-  pca.setPWMFreq(SERVO_FREQ_HZ);
-  delay(10);
-  Serial.print("[OK] PWM frequency set to ");
-  Serial.print(SERVO_FREQ_HZ);
-  Serial.println(" Hz");
-=======
   // --- I2C & PCA9685 ---
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(400000); // Optimize I2C speed to 400kHz for faster PWM updates
@@ -554,25 +482,8 @@ void setup() {
 #else
   Serial.println("[INFO] WiFi disabled — Serial only mode");
 #endif
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
 
-  // Reset servo CH5 to demanded angle on boot
   Serial.println();
-<<<<<<< HEAD
-  Serial.print(">>> Resetting servo CH5 to ");
-  Serial.print(DEMANDED_DEGREE);
-  Serial.println("°");
-  resetSingleServo(5, DEMANDED_DEGREE);
-  Serial.println("[DONE]");
-  Serial.println();
-
-  // Prompt for interactive control
-  Serial.println("──────────────────────────────────────────────");
-  Serial.println("Serial commands:");
-  Serial.println("  <ch> <angle>   Move one servo   (e.g. 2 90)");
-  Serial.println("  all <angle>    Move all servos   (e.g. all 45)");
-  Serial.println("──────────────────────────────────────────────");
-=======
   Serial.println("[READY] Listening for commands...");
   Serial.println(
       "  Protocol: F<t>,<i>,<m>,<r>,<p>,<w>  C<ch>,<angle>  G<str>  P  S");
@@ -582,61 +493,28 @@ void setup() {
   Serial.print(COMPLIANCE_ZONE_DEG);
   Serial.println("deg");
   Serial.println("========================================");
->>>>>>> a4bbd299d7136c62fb48ec74b9faf694e9d41bad
 }
 
-// ======================== LOOP =====================================
-
 void loop() {
-  // Interactive: read commands from Serial Monitor
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.length() == 0) return;
+  // Handle incoming commands
+  handleSerial();
 
-    // ── "all <angle>" — move every servo ──
-    if (input.startsWith("all ") || input.startsWith("ALL ")) {
-      float angle = input.substring(4).toFloat();
-      if (angle < 0 || angle > 180) {
-        Serial.println("[WARN] Angle must be 0-180");
-      } else {
-        resetAllServos(angle);
-      }
-      return;
-    }
+#if ENABLE_WIFI
+  handleWiFi();
+#endif
 
-    // ── "<ch> <angle>" — move a single servo ──
-    int spaceIdx = input.indexOf(' ');
-    if (spaceIdx > 0) {
-      int ch        = input.substring(0, spaceIdx).toInt();
-      float angle   = input.substring(spaceIdx + 1).toFloat();
-
-      if (!isValidChannel((uint8_t)ch)) {
-        Serial.print("[WARN] CH");
-        Serial.print(ch);
-        Serial.print(" is not in SERVO_CHANNELS. Valid: ");
-        for (int i = 0; i < NUM_SERVOS; i++) {
-          Serial.print(SERVO_CHANNELS[i]);
-          if (i < NUM_SERVOS - 1) Serial.print(", ");
-        }
-        Serial.println();
-      } else if (angle < 0 || angle > 180) {
-        Serial.println("[WARN] Angle must be 0-180");
-      } else {
-        Serial.println();
-        Serial.print(">>> Moving servo CH");
-        Serial.print(ch);
-        Serial.print(" to ");
-        Serial.print(angle, 1);
-        Serial.println("°");
-        resetSingleServo((uint8_t)ch, angle);
-        Serial.println("[DONE]");
-        Serial.println();
-      }
-      return;
-    }
-
-    // ── Unknown format ──
-    Serial.println("[WARN] Use:  <ch> <angle>  or  all <angle>");
+  // Update servo positions (smooth movement with compliance)
+  unsigned long now = millis();
+  if (now - lastUpdateTime >= UPDATE_INTERVAL_MS) {
+    updateServos();
+    lastUpdateTime = now;
   }
+
+// Check for current stall (if hardware is present)
+#if ENABLE_CURRENT_SENSE
+  checkCurrentStall();
+#endif
+
+  // Update status LED
+  updateLED();
 }
