@@ -15,7 +15,7 @@ Real-time robot hand control using laptop webcam hand tracking with ESP32 + PCA9
 | ESP32 DevKit 30P (CH340, Type-C) | 1 | WiFi + Bluetooth MCU |
 | PCA9685 16-Channel PWM Driver | 1 | I2C servo controller |
 | MG996R Servo Motor | 6 | 5 fingers + 1 wrist |
-| External 5V Power Supply (≥10A) | 1 | **DO NOT power servos from ESP32** |
+| 5V 20A DC Power Supply Adapter | 1 | **DO NOT power servos from ESP32** |
 | USB Type-C Cable | 1 | ESP32 ↔ Laptop |
 | Jumper Wires (M-F) | ~10 | For I2C + power connections |
 | InMoov Hand (3D printed) | 1 | With fishing line tendons |
@@ -38,11 +38,10 @@ Real-time robot hand control using laptop webcam hand tracking with ESP32 + PCA9
   │                 │      │       │                     │
   └─────────────────┘      │       │  CH0 ─── Thumb  Servo (Orange=Signal)
                            │       │  CH1 ─── Index  Servo
-                           │       │  CH2 ─── Middle Servo
-     External 5V PSU       │       │  CH3 ─── Ring   Servo
-  ┌─────────────────┐      │       │  CH4 ─── Pinky  Servo
+     5V 20A Adapter        │       │  CH2 ─── Middle Servo
+  ┌─────────────────┐      │       │  CH3 ─── Ring   Servo
   │  +5V           ├──────┼───────┤ V+  (Servo Power)  │
-  │  GND           ├──────┘       │                     │
+  │  GND           ├──────┘       │  CH4 ─── Pinky  Servo
   └─────────────────┘              │  CH5 ─── Wrist  Servo
                                    └─────────────────────┘
 ```
@@ -59,7 +58,7 @@ Real-time robot hand control using laptop webcam hand tracking with ESP32 + PCA9
 ### ⚠️ Critical Power Notes
 
 1. **NEVER** power servos from the ESP32 USB or 3.3V pins
-2. Use an external **5V power supply rated at 10A+** (each MG996R can draw 2.5A stall)
+2. Use the **5V 20A adapter** connected directly to PCA9685 V+ (MG996R servos are rated for 4.8–7.2V)
 3. Connect PSU ground to PCA9685 GND **AND** ESP32 GND (common ground)
 4. Add a **1000µF capacitor** across V+ and GND on PCA9685 to prevent brownouts
 

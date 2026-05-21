@@ -14,7 +14,7 @@
  *   ESP32 GPIO22 (SCL)  →  PCA9685 SCL
  *   ESP32 3.3V          →  PCA9685 VCC
  *   ESP32 GND           →  PCA9685 GND
- *   External 5-6V PSU   →  PCA9685 V+ (servo power)
+ *   5V 20A Adapter   →  PCA9685 V+ (servo power)
  *
  * Board:
  *   Select "ESP32 Dev Module" in Arduino IDE.
