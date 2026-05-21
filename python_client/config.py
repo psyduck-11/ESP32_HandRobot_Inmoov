@@ -37,7 +37,7 @@ MEDIAPIPE_TRACKING_CONFIDENCE = 0.6
 
 # Which hand controls the robot (True = track left hand, False = track right)
 # Note: MediaPipe labels are mirrored, so "Left" in camera = your right hand
-MIRROR_MODE = True
+MIRROR_MODE = False
 
 # =============================================================================
 #  SMOOTHING & PERFORMANCE
@@ -70,10 +70,6 @@ GRIP_MODES = {
 
 # Default grip mode on startup
 DEFAULT_GRIP_MODE = "NORMAL"
-
-# Compliance: when a finger is within this many degrees of its grip limit,
-# its servo speed is progressively reduced (prevents sudden force spikes)
-COMPLIANCE_ZONE_DEGREES = 20
 
 # Stall detection: if ESP32 reports current above this threshold (mA),
 # the finger backs off automatically. Set 0 to disable.

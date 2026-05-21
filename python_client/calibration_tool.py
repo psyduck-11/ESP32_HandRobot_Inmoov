@@ -12,6 +12,7 @@ import sys
 import time
 import json
 import os
+import threading
 import cv2
 import numpy as np
 
@@ -29,6 +30,7 @@ class CalibrationState:
         self.inverted = dict(config.SERVO_INVERTED)
         self.selected = 0
         self.testing = False
+        self._prev_angles = dict(self.current_angles)  # Track changes to avoid redundant sends
 
     @property
     def selected_finger(self):
@@ -164,9 +166,12 @@ def main():
 
     try:
         while True:
+            # Only send commands for servos whose slider actually changed
             for finger in state.fingers:
-                client.send_single_servo(config.SERVO_CHANNELS[finger],
-                                         state.current_angles[finger])
+                angle = state.current_angles[finger]
+                if angle != state._prev_angles.get(finger):
+                    client.send_single_servo(config.SERVO_CHANNELS[finger], angle)
+                    state._prev_angles[finger] = angle
 
             canvas = draw_ui(state, client)
             cv2.imshow(win, canvas)
@@ -189,14 +194,18 @@ def main():
                 f = state.selected_finger
                 state.inverted[f] = not state.inverted[f]
                 print(f"[CAL] {f} inverted: {state.inverted[f]}")
-            elif key == ord('t') and client.connected:
+            elif key == ord('t') and client.connected and not state.testing:
                 state.testing = True
-                test_servo(client, state, state.selected_finger)
-                state.testing = False
-            elif key == ord('a') and client.connected:
+                def _run_test_single():
+                    test_servo(client, state, state.selected_finger)
+                    state.testing = False
+                threading.Thread(target=_run_test_single, daemon=True).start()
+            elif key == ord('a') and client.connected and not state.testing:
                 state.testing = True
-                test_all(client, state)
-                state.testing = False
+                def _run_test_all():
+                    test_all(client, state)
+                    state.testing = False
+                threading.Thread(target=_run_test_all, daemon=True).start()
             elif key == ord('s'):
                 save_calibration(state)
     except KeyboardInterrupt:

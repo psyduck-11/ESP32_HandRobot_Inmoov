@@ -1,5 +1,5 @@
 """
-Reset Servos — Sets all 5 finger servos to 90° (neutral position).
+Reset Servos — Sets all 6 servos (5 fingers + wrist) to 90° (neutral position).
 
 Usage:
     python reset_servos.py
@@ -45,7 +45,7 @@ def main():
     else:
         print("[!] No PONG received — continuing anyway.")
 
-    # Build the angle dict — all five fingers + wrist to 90°
+    # Build the angle dict — all 6 servos (5 fingers + wrist) to 90°
     angles = {
         "thumb":  NEUTRAL_ANGLE,
         "index":  NEUTRAL_ANGLE,
@@ -55,15 +55,12 @@ def main():
         "wrist":  NEUTRAL_ANGLE,
     }
 
-    # Bypass rate-limiting / deadband by sending raw command directly
-    cmd = (
-        f"F{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},"
-        f"{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE}\n"
-    )
-
+    # Send all servos to neutral using the public API with force=True
+    # to bypass rate limiting and deadband checks
     try:
-        client._send_raw(cmd)
-        print(f"[✓] Sent: {cmd.strip()}")
+        client.send_all_servos(angles, force=True)
+        print(f"[✓] Sent: F{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},"
+              f"{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE}")
         print("[✓] All servos set to 90°.")
     except Exception as e:
         print(f"[!] Send failed: {e}")

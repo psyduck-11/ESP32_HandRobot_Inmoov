@@ -142,10 +142,11 @@ def draw_ui_overlay(frame, curls, servo_angles, tracker, client, fps, paused, wr
     """Draw the informational overlay on the camera frame."""
     h, w = frame.shape[:2]
 
-    # --- Semi-transparent top bar ---
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 50), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+    # --- Semi-transparent top bar (ROI-based to avoid full frame copy) ---
+    bar_height = 50
+    roi = frame[0:bar_height, :].copy()
+    cv2.rectangle(roi, (0, 0), (w, bar_height), (20, 20, 20), -1)
+    cv2.addWeighted(roi, 0.7, frame[0:bar_height], 0.3, 0, frame[0:bar_height])
 
     # Title
     cv2.putText(frame, "InMoov Hand Control", (10, 35),
@@ -285,11 +286,18 @@ def main():
     tracker = HandTracker()
     print("[INIT] Hand tracker ready")
 
+    # Initialize grip controller
+    grip = GripController()
+    print(f"[INIT] Grip mode: {grip.mode_name} ({grip.label}) — strength {grip.get_strength():.0f}%")
+
     # Initialize ESP32 client
     client = create_client()
     print(f"[INIT] Connecting to ESP32 ({config.COMM_MODE})...")
     if client.connect():
         print("[INIT] ESP32 connection established!")
+        # Sync configuration and grip strength
+        client.sync_config()
+        client.set_grip_strength(int(grip.get_strength()))
         # Send a ping to verify
         if client.ping():
             print("[INIT] ESP32 responded to ping — communication OK")
@@ -318,12 +326,10 @@ def main():
     wrist_enabled = True
     hold_mode = False       # When True, robot is locked to held_* posture
     mirror = config.MIRROR_MODE
-    prev_time = time.time()
+    prev_time = time.perf_counter()
     fps = 0
-    grip = GripController()
     held_curls = None       # Snapshot captured when H is pressed
     held_servo_angles = None
-    print(f"[INIT] Grip mode: {grip.mode_name} ({grip.label}) — strength {grip.get_strength():.0f}%")
 
     try:
         while True:
@@ -373,8 +379,8 @@ def main():
             if config.SHOW_LANDMARKS:
                 frame = tracker.draw_landmarks(frame)
 
-            # Calculate FPS
-            current_time = time.time()
+            # Calculate FPS (perf_counter for high-resolution timing on Windows)
+            current_time = time.perf_counter()
             dt = current_time - prev_time
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt)  # Smoothed FPS
@@ -402,6 +408,8 @@ def main():
                 print("[INFO] Reconnecting to ESP32...")
                 client.disconnect()
                 if client.connect():
+                    client.sync_config()
+                    client.set_grip_strength(int(grip.get_strength()))
                     print("[INFO] Reconnected!")
                 else:
                     print("[INFO] Reconnection failed")
@@ -409,13 +417,18 @@ def main():
                 mirror = not mirror
                 print(f"[INFO] Mirror mode: {'ON' if mirror else 'OFF'}")
             elif key == ord('h') or key == ord('H'):
-                hold_mode = not hold_mode
-                if hold_mode:
-                    # Capture current posture as the frozen snapshot
-                    held_curls = dict(curls)
-                    held_servo_angles = dict(servo_angles)
-                    print(f"[HOLD] LOCKED — posture frozen (press H again to release)")
+                if not hold_mode:
+                    # Attempting to LOCK — only allow if hand is currently detected
+                    if tracker.hand_detected:
+                        hold_mode = True
+                        held_curls = dict(curls)
+                        held_servo_angles = dict(servo_angles)
+                        print(f"[HOLD] LOCKED — posture frozen (press H again to release)")
+                    else:
+                        print(f"[HOLD] Cannot lock — no hand detected. Show your hand first.")
                 else:
+                    # UNLOCK
+                    hold_mode = False
                     held_curls = None
                     held_servo_angles = None
                     print(f"[HOLD] RELEASED — back to live tracking")
@@ -424,12 +437,15 @@ def main():
                 print(f"[INFO] Wrist control: {'ON' if wrist_enabled else 'OFF'}")
             elif key == ord('g') or key == ord('G'):
                 mode = grip.cycle_mode()
+                client.set_grip_strength(int(grip.get_strength()))
                 print(f"[GRIP] Mode: {mode} — {grip.label} (strength {grip.get_strength():.0f}%)")
             elif key == ord('+') or key == ord('='):
                 s = grip.adjust_strength(5)
+                client.set_grip_strength(int(s))
                 print(f"[GRIP] Strength: {s:.0f}%")
             elif key == ord('-') or key == ord('_'):
                 s = grip.adjust_strength(-5)
+                client.set_grip_strength(int(s))
                 print(f"[GRIP] Strength: {s:.0f}%")
 
     except KeyboardInterrupt:

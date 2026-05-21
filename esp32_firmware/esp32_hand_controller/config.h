@@ -22,6 +22,7 @@
 #define PCA9685_ADDR  0x40     // Default I2C address
 #define I2C_SDA       21       // ESP32 default SDA pin
 #define I2C_SCL       22       // ESP32 default SCL pin
+#define I2C_CLOCK     400000   // I2C clock speed (Hz) — 400kHz Fast Mode for PCA9685
 #define PWM_FREQ      50       // Servo PWM frequency (Hz) — standard is 50Hz
 
 // =============================================================================

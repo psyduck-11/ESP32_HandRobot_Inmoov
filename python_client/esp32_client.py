@@ -51,30 +51,35 @@ class BaseClient(ABC):
         """Read a line from ESP32. Returns empty string on timeout."""
         pass
 
-    def send_all_servos(self, angles: dict):
+    def send_all_servos(self, angles: dict, force: bool = False):
         """
         Send all servo angles to ESP32.
 
         Args:
             angles: Dict with keys (thumb, index, middle, ring, pinky, wrist)
                     and int values 0–180.
+            force:  If True, bypass rate limiting and deadband checks.
         """
         if not self._connected:
             return
 
-        # Rate limiting
-        now = time.time()
-        if now - self._last_send_time < self._send_interval:
-            return
-
-        # Deadband check: skip if nothing changed significantly
-        if self._last_angles:
-            max_change = max(
-                abs(angles.get(k, 0) - self._last_angles.get(k, 0))
-                for k in angles
-            )
-            if max_change < config.DEADBAND_DEGREES:
+        if not force:
+            # Rate limiting
+            now = time.time()
+            if now - self._last_send_time < self._send_interval:
                 return
+
+            # Deadband check: skip if nothing changed significantly
+            # Only compare keys that exist in both dicts to avoid false triggers
+            if self._last_angles:
+                common_keys = set(angles) & set(self._last_angles)
+                if common_keys:
+                    max_change = max(
+                        abs(angles[k] - self._last_angles[k])
+                        for k in common_keys
+                    )
+                    if max_change < config.DEADBAND_DEGREES:
+                        return
 
         # Build command string
         t = int(angles.get("thumb", 90))
@@ -86,6 +91,7 @@ class BaseClient(ABC):
 
         cmd = f"F{t},{i},{m},{r},{p},{w}\n"
 
+        now = time.time()
         with self._lock:
             try:
                 self._send_raw(cmd)
@@ -128,6 +134,51 @@ class BaseClient(ABC):
                 self._connected = False
                 return False
 
+    def sync_config(self):
+        """Send configuration to ESP32: Inversion, Min, Max."""
+        if not self._connected:
+            return
+
+        fingers = ["thumb", "index", "middle", "ring", "pinky", "wrist"]
+        
+        # Send Inversions (I command)
+        invs = [1 if config.SERVO_INVERTED[f] else 0 for f in fingers]
+        cmd_i = f"I{invs[0]},{invs[1]},{invs[2]},{invs[3]},{invs[4]},{invs[5]}\n"
+        
+        # Send Min angles (M command)
+        mins = [config.SERVO_MIN[f] for f in fingers]
+        cmd_m = f"M{mins[0]},{mins[1]},{mins[2]},{mins[3]},{mins[4]},{mins[5]}\n"
+        
+        # Send Max angles (X command)
+        maxs = [config.SERVO_MAX[f] for f in fingers]
+        cmd_x = f"X{maxs[0]},{maxs[1]},{maxs[2]},{maxs[3]},{maxs[4]},{maxs[5]}\n"
+        
+        with self._lock:
+            try:
+                self._send_raw(cmd_i)
+                self._read_line(timeout=0.2)
+                self._send_raw(cmd_m)
+                self._read_line(timeout=0.2)
+                self._send_raw(cmd_x)
+                self._read_line(timeout=0.2)
+            except Exception as e:
+                print(f"[COMM] Sync error: {e}")
+                self._connected = False
+
+    def set_grip_strength(self, strength: int):
+        """Send grip strength limit to ESP32."""
+        if not self._connected:
+            return
+            
+        cmd = f"G{strength}\n"
+        with self._lock:
+            try:
+                self._send_raw(cmd)
+                self._read_line(timeout=0.2)
+            except Exception as e:
+                print(f"[COMM] Send error: {e}")
+                self._connected = False
+
 
 class SerialClient(BaseClient):
     """USB Serial connection to ESP32."""
@@ -139,6 +190,7 @@ class SerialClient(BaseClient):
     def connect(self) -> bool:
         try:
             import serial
+            import serial.tools.list_ports
             self._serial = serial.Serial(
                 port=config.SERIAL_PORT,
                 baudrate=config.SERIAL_BAUD,
@@ -153,6 +205,17 @@ class SerialClient(BaseClient):
             return True
         except Exception as e:
             print(f"[SERIAL] Connection failed: {e}")
+            try:
+                import serial.tools.list_ports
+                ports = list(serial.tools.list_ports.comports())
+                if ports:
+                    print(f"[SERIAL] Available ports:")
+                    for p in ports:
+                        print(f"         {p.device} — {p.description}")
+                else:
+                    print(f"[SERIAL] No COM ports found — is the ESP32 plugged in?")
+            except Exception:
+                pass
             self._connected = False
             return False
 
@@ -221,6 +284,10 @@ class WiFiClient(BaseClient):
                     self._connected = False
                     return ""
                 self._recv_buffer += chunk
+                # Prevent unbounded buffering on malformed data
+                if len(self._recv_buffer) > 1024:
+                    self._recv_buffer = ""
+                    return ""
 
             line, self._recv_buffer = self._recv_buffer.split('\n', 1)
             return line + '\n'
