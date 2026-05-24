@@ -15,7 +15,7 @@
  *    ESP32 DevKit 30P (CH340, Type-C)
  *    PCA9685 16-ch PWM driver on I2C (SDA=21, SCL=22)
  *    6x MG996R servos on channels 0-5
- *    External 5V 10A+ power supply on PCA9685 V+
+ *    5V 20A Adapter on PCA9685 V+
  * ============================================================
  */
 
