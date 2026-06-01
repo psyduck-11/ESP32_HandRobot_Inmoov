@@ -567,8 +567,7 @@ def main():
     print(f"[INIT] Connecting to ESP32 ({config.COMM_MODE})...")
     if client.connect():
         print("[INIT] ESP32 connection established!")
-        # Sync configuration and grip strength
-        client.sync_config()
+        # Send grip strength to ESP32
         client.set_grip_strength(int(grip.get_strength()))
         # Send a ping to verify
         if client.ping():
@@ -677,7 +676,6 @@ def main():
                 print("[INFO] Reconnecting to ESP32 via mouse click...")
                 client.disconnect()
                 if client.connect():
-                    client.sync_config()
                     client.set_grip_strength(int(grip.get_strength()))
                     print("[INFO] Reconnected!")
                 else:

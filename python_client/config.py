@@ -11,7 +11,7 @@ Adjust these values to match your hardware setup.
 COMM_MODE = "serial"
 
 # --- Serial Settings (for wired USB connection) ---
-SERIAL_PORT = "COM6"        # Change to your ESP32's COM port (check Device Manager)
+SERIAL_PORT = "COM7"        # Change to your ESP32's COM port (check Device Manager)
 SERIAL_BAUD = 115200
 
 # --- WiFi Settings (for wireless TCP connection) ---
@@ -30,7 +30,6 @@ CAMERA_HEIGHT = 720          # Capture height
 #  HAND TRACKING SETTINGS
 # =============================================================================
 
-MEDIAPIPE_MODEL_COMPLEXITY = 1    # 0 = lite (fast), 1 = full (accurate)
 MEDIAPIPE_MAX_HANDS = 1           # Track only 1 hand
 MEDIAPIPE_DETECTION_CONFIDENCE = 0.7
 MEDIAPIPE_TRACKING_CONFIDENCE = 0.6
@@ -69,7 +68,7 @@ GRIP_MODES = {
 }
 
 # Default grip mode on startup
-DEFAULT_GRIP_MODE = "NORMAL"
+DEFAULT_GRIP_MODE = "FIRM"
 
 # Stall detection: if ESP32 reports current above this threshold (mA),
 # the finger backs off automatically. Set 0 to disable.
@@ -96,22 +95,22 @@ SERVO_CHANNELS = {
 
 # Servo angle when finger is fully OPEN (extended)
 SERVO_MIN = {
-    "thumb":  10,
-    "index":  10,
-    "middle": 10,
-    "ring":   10,
-    "pinky":  10,
-    "wrist":  10,
+    "thumb":  0,
+    "index":  0,
+    "middle": 0,
+    "ring":   0,
+    "pinky":  0,
+    "wrist":  0,
 }
 
 # Servo angle when finger is fully CLOSED (curled)
 SERVO_MAX = {
-    "thumb":  170,
-    "index":  170,
-    "middle": 170,
-    "ring":   170,
-    "pinky":  170,
-    "wrist":  170,
+    "thumb":  180,
+    "index":  180,
+    "middle": 180,
+    "ring":   180,
+    "pinky":  180,
+    "wrist":  180,
 }
 
 # Set True if a servo rotates in the opposite direction from expected
@@ -127,7 +126,7 @@ SERVO_INVERTED = {
 # Per-finger grip strength override (0-100, or None to use global mode).
 # Use this to make specific fingers softer, e.g. thumb often needs less force.
 FINGER_GRIP_OVERRIDE = {
-    "thumb":  None,   # None = use grip mode default
+    "thumb":  100,    # 100 = Max strength override
     "index":  None,
     "middle": None,
     "ring":   None,
