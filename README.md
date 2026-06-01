@@ -79,7 +79,16 @@ Required packages:
 - `numpy` — Math operations
 - `pyserial` — USB serial communication
 
-### Step 2: Flash ESP32 Firmware
+### Step 2: Download MediaPipe Model
+
+The hand tracking requires a model file `hand_landmarker.task` in the `python_client/` folder:
+
+```powershell
+cd python_client
+Invoke-WebRequest -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" -OutFile "hand_landmarker.task"
+```
+
+### Step 3: Flash ESP32 Firmware
 
 1. Open Arduino IDE (or PlatformIO)
 2. Install required libraries via Library Manager:
@@ -95,7 +104,7 @@ Required packages:
 7. Click **Upload** (→ button)
 8. Open **Serial Monitor** (115200 baud) to verify startup messages
 
-### Step 3: Configure Python Client
+### Step 4: Configure Python Client
 
 Edit `python_client/config.py`:
 
@@ -126,22 +135,27 @@ python main.py
 ```
 
 ### Controls
-   
+
 | Key | Action |
 |-----|--------|
 | `Q` | Quit |
 | `P` | Pause/Resume sending to ESP32 |
 | `R` | Reconnect to ESP32 |
 | `M` | Toggle mirror mode (flip camera) |
+| `H` | Toggle hold mode (freeze posture) |
 | `Space` | Toggle wrist control on/off |
+| `G` | Cycle grip mode (DELICATE → LIGHT → NORMAL → FIRM) |
+| `+` / `-` | Fine-adjust grip strength ±5% |
+
+All top-bar badges and cards are also **mouse-clickable**.
 
 ### What You Should See
 
-- Camera feed with hand landmarks drawn in color
-- Finger curl bar gauges at bottom-left (green=open, red=closed)
-- Servo angle numbers above each bar
-- Connection status indicator (green dot = connected)
-- FPS counter top-right
+- Camera feed with hand landmarks drawn (green joints, blue fingertips, red wrist)
+- Top badge bar: QUIT, ACTIVE/PAUSED, INMOOV title, connection status, FPS
+- Hold badge, grip card with strength bar, telemetry bars, and hand pose thumbnail
+- Center alerts when no hand detected or system paused
+- Bottom taskbar with keyboard shortcut hints
 
 ---
 
@@ -245,15 +259,19 @@ After everything works over USB Serial:
 | Problem | Solution |
 |---------|----------|
 | "Cannot open camera" | Try `CAMERA_INDEX = 1` in config.py, or close other apps using the camera |
-| No hand detected | Ensure good lighting, show full hand to camera |
+| "Hand landmarker model not found" | Download `hand_landmarker.task` — see Step 2 of Software Setup |
+| No hand detected | Ensure good lighting, show full hand to camera, avoid busy backgrounds |
 | ESP32 won't connect (Serial) | Check COM port in Device Manager, try different USB cable |
+| "ModuleNotFoundError: serial" | Install with `pip install pyserial` (NOT `pip install serial`) |
 | Servos don't move | Check external power supply is ON and connected to PCA9685 V+ |
 | Servos jitter/buzz | Servo is hitting mechanical limit — recalibrate MIN/MAX to avoid extremes |
 | Erratic servo movement | Add 1000µF capacitor to PCA9685 V+/GND, check wiring |
-| WiFi won't connect | Verify SSID/password, ensure 2.4GHz network (ESP32 doesn't support 5GHz) |
-| Laggy response | Reduce `MEDIAPIPE_MODEL_COMPLEXITY` to `0` in config.py |
+| WiFi won't connect | Verify SSID/password, ensure 2.4 GHz network (ESP32 doesn't support 5 GHz) |
+| Laggy response | Reduce `MEDIAPIPE_MODEL_COMPLEXITY` to `0`, increase `EMA_ALPHA` |
 | Wrong finger mapping | Check PCA9685 channel wiring matches config.h CH_THUMB through CH_WRIST |
-| "ModuleNotFoundError: serial" | Install with `pip install pyserial` (not `pip install serial`) |
+| Wrist moves wrong direction | Set `SERVO_INVERTED["wrist"] = True` in config.py, or recalibrate |
+| Hold mode won't activate | A hand must be detected first — show your hand, then press H |
+| Grip too strong/weak | Press G to cycle modes, or +/− to fine-tune strength |
 
 ---
 
@@ -262,12 +280,16 @@ After everything works over USB Serial:
 ```
 ESP32_HandRobot_Inmoov/
 ├── README.md                       ← You are here
+├── USER_MANUAL.md                  ← Comprehensive manual with algorithm deep-dives
+├── algorithms.md                   ← Algorithm reference
 ├── python_client/
 │   ├── config.py                   ← Configuration (COM port, camera, calibration)
 │   ├── hand_tracker.py             ← MediaPipe hand tracking & angle calculation
 │   ├── esp32_client.py             ← Serial/WiFi communication
 │   ├── main.py                     ← Main application entry point
 │   ├── calibration_tool.py         ← Interactive servo calibration
+│   ├── reset_servos.py             ← Reset all servos to 90° (neutral)
+│   ├── hand_landmarker.task        ← MediaPipe model file (downloaded)
 │   ├── calibration_data.json       ← (Generated) Saved calibration values
 │   └── requirements.txt            ← Python dependencies
 └── esp32_firmware/

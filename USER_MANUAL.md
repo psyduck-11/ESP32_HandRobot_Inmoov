@@ -1,6 +1,6 @@
 # InMoov Hand Robot — Comprehensive User Manual
 
-> **Version:** 1.0 · **Last Updated:** May 2026
+> **Version:** 2.0 · **Last Updated:** May 2026
 >
 > Real-time robot hand control using laptop webcam hand tracking with ESP32 + PCA9685 + MG996R servos.
 
@@ -226,6 +226,23 @@ All Python-side settings are in `python_client/config.py`. ESP32 settings are in
 | `SERVO_INVERTED` | `True` if servo rotates backwards |
 | `FINGER_GRIP_OVERRIDE` | Per-finger grip strength override (or `None`) |
 
+#### Display
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SHOW_LANDMARKS` | `True` | Draw hand landmarks on camera feed |
+| `SHOW_ANGLE_BARS` | `True` | Show per-finger angle bar gauges |
+| `SHOW_FPS` | `True` | Show FPS counter |
+| `WINDOW_NAME` | `"InMoov Hand Gesture Control"` | OpenCV window title |
+
+#### Stall Detection
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `CURRENT_STALL_THRESHOLD_MA` | `0` | ADC threshold for stall detection (0 = disabled) |
+| `STALL_BACKOFF_DEGREES` | `15` | Degrees to back off on stall |
+| `DEFAULT_GRIP_MODE` | `"NORMAL"` | Grip mode on startup |
+
 ### ESP32 — `config.h`
 
 | Setting | Default | Description |
@@ -238,7 +255,14 @@ All Python-side settings are in `python_client/config.py`. ESP32 settings are in
 | `SERVO_SPEED_LIMIT` | `8` | Max degrees per update step |
 | `UPDATE_INTERVAL_MS` | `20` | Servo update loop interval |
 | `COMPLIANCE_ZONE_DEG` | `20` | Firmware-side compliance zone |
+| `COMPLIANCE_MIN_SPEED` | `1` | Min speed (°/update) in compliance zone |
 | `ENABLE_CURRENT_SENSE` | `false` | Enable hardware stall detection |
+| `CURRENT_SENSE_PIN` | `34` | ESP32 ADC pin for current sensing |
+| `CURRENT_STALL_ADC` | `2000` | ADC threshold for stall (12-bit) |
+| `STALL_BACKOFF_DEG` | `15` | Degrees to back off on stall |
+| `STALL_DEBOUNCE_COUNT` | `5` | Consecutive readings before stall trigger |
+| `SERIAL_BAUD` | `115200` | Serial baud rate |
+| `LED_PIN` | `2` | Built-in status LED pin |
 
 ---
 
@@ -264,14 +288,30 @@ python main.py
 | `G` | Cycle grip mode (DELICATE → LIGHT → NORMAL → FIRM) |
 | `+` / `-` | Fine-adjust grip strength ±5% |
 
+### Mouse Controls
+
+All top-bar badges and cards are clickable:
+
+| UI Element | Click Action |
+|------------|--------------|
+| **QUIT** badge | Exit the application |
+| **ACTIVE/PAUSED** badge | Toggle pause state |
+| **CONNECTED/DISCONNECTED** badge | Reconnect to ESP32 |
+| **HOLD** badge | Toggle hold/lock mode |
+| **GRIP** card | Cycle to next grip mode |
+| **WRIST** button (in telemetry) | Toggle wrist control on/off |
+| **PAUSED** center alert | Resume sending |
+
 ### What You Should See
 
 - **Camera feed** with hand landmarks drawn (green joints, blue fingertips, red wrist)
-- **Top bar:** "InMoov Hand Control" title, FPS counter, connection status dot
-- **Hold indicator:** "LIVE" or "LOCKED" below the title
-- **Grip mode badge:** Top-right with strength bar
-- **Finger bars:** Bottom-left, 6 vertical bars (T, I, M, R, P, W) showing curl %
-- **Controls hint:** Bottom edge with key shortcuts
+- **Top badges (row 1):** QUIT, ACTIVE/PAUSED, INMOOV title, CONNECTED/DISCONNECTED status, FPS counter
+- **Hold badge (row 2):** Shows "POSTURE LOCKED" (yellow) or "LIVE CONTROLLER" (muted)
+- **Grip card (top-right):** Shows grip mode label, strength bar, and percentage
+- **Telemetry card (bottom-left):** 5–6 vertical bars (T, I, M, R, P, W) showing curl %, with WRIST toggle button
+- **Hand pose thumbnail (bottom-right):** Miniature skeleton of the detected hand pose (or locked pose)
+- **Center alerts:** "NO HAND DETECTED" (orange) or "SYSTEM TRANSMISSION: PAUSED" (red) when applicable
+- **Bottom taskbar:** Key shortcut reference strip
 
 ### Preview Mode
 
@@ -848,7 +888,13 @@ Text-based protocol over Serial or WiFi TCP. All commands end with `\n`.
 
 | Response | Meaning |
 |----------|---------|
+| `OK\n` | Command accepted (F, C commands) |
 | `PONG\n` | Reply to ping |
+| `OK:G<n>\n` | Grip strength set to n% |
+| `A<t>,<i>,<m>,<r>,<p>,<w>,G<grip>\n` | Status reply (current angles + grip) |
+| `E:INVALID_ARGS\n` | Wrong number of arguments |
+| `E:INVALID_CHANNEL\n` | Invalid PCA9685 channel |
+| `E:UNKNOWN_CMD\n` | Unrecognized command letter |
 
 ---
 

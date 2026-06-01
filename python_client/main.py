@@ -18,8 +18,6 @@ import sys
 import time
 import cv2
 import numpy as np
-import tkinter as tk
-from tkinter import simpledialog
 
 import config
 from hand_tracker import HandTracker
@@ -142,196 +140,6 @@ def wrist_to_servo_angle(wrist_deg: float) -> int:
 
     return int(np.clip(angle, min(min_angle, max_angle), max(min_angle, max_angle)))
 
-
-class CameraSelectionDialog:
-    """A custom Tkinter dialog that presents clickable camera source buttons."""
-    def __init__(self, parent, detected_cameras, title="Select Camera Source"):
-        self.parent = parent
-        self.result = None
-        
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title(title)
-        self.dialog.geometry("380x320")
-        self.dialog.resizable(False, False)
-        
-        # Style details
-        self.dialog.configure(bg="#2d2d2d")
-        
-        # Center the dialog
-        self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f"+{x}+{y}")
-        
-        # Make topmost and modal
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
-        self.dialog.focus_set()
-        
-        # Header Label
-        lbl = tk.Label(
-            self.dialog, 
-            text="Select Camera Source", 
-            font=("Helvetica", 14, "bold"), 
-            bg="#2d2d2d", 
-            fg="#00ff80", 
-            pady=10
-        )
-        lbl.pack()
-        
-        # Description Label
-        lbl_desc = tk.Label(
-            self.dialog, 
-            text="Choose a detected camera or enter a custom stream URL:", 
-            font=("Helvetica", 9), 
-            bg="#2d2d2d", 
-            fg="#cccccc", 
-            pady=5
-        )
-        lbl_desc.pack()
-        
-        # Grid Frame for buttons
-        btn_frame = tk.Frame(self.dialog, bg="#2d2d2d")
-        btn_frame.pack(pady=10)
-        
-        # Camera options based on detection
-        for idx, cam_idx in enumerate(detected_cameras):
-            if cam_idx == 0:
-                btn_text = "Camera 0 (Laptop)"
-            else:
-                btn_text = f"Camera {cam_idx} (Detected)"
-                
-            btn = tk.Button(
-                btn_frame, 
-                text=btn_text, 
-                font=("Helvetica", 9, "bold"),
-                width=16, 
-                height=2,
-                bg="#3a3a3a",
-                fg="#ffffff",
-                activebackground="#00ff80",
-                activeforeground="#2d2d2d",
-                relief=tk.FLAT,
-                command=lambda val=cam_idx: self.select_source(val)
-            )
-            btn.grid(row=idx//2, column=idx%2, padx=10, pady=5)
-            
-        # Custom URL Frame
-        custom_frame = tk.Frame(self.dialog, bg="#2d2d2d", pady=5)
-        custom_frame.pack()
-        
-        lbl_custom = tk.Label(custom_frame, text="Custom URL:", font=("Helvetica", 9), bg="#2d2d2d", fg="#ffffff")
-        lbl_custom.pack(side=tk.LEFT, padx=5)
-        
-        self.entry = tk.Entry(custom_frame, width=22, font=("Helvetica", 10), bg="#3a3a3a", fg="#ffffff", insertbackground="white", relief=tk.FLAT)
-        self.entry.pack(side=tk.LEFT, padx=5)
-        self.entry.bind("<Return>", lambda event: self.select_custom())
-        
-        btn_use = tk.Button(
-            custom_frame, 
-            text="Use URL", 
-            font=("Helvetica", 9, "bold"),
-            bg="#0080ff",
-            fg="#ffffff",
-            activebackground="#00ff80",
-            relief=tk.FLAT,
-            command=self.select_custom
-        )
-        btn_use.pack(side=tk.LEFT, padx=5)
-        
-        # Cancel Button
-        btn_cancel = tk.Button(
-            self.dialog, 
-            text="Cancel", 
-            font=("Helvetica", 10),
-            width=15, 
-            bg="#555555",
-            fg="#ffffff",
-            activebackground="#ff5555",
-            relief=tk.FLAT,
-            command=self.close
-        )
-        btn_cancel.pack(pady=10)
-        
-        self.dialog.protocol("WM_DELETE_WINDOW", self.close)
-        self.dialog.wait_window()
-        
-    def select_source(self, index):
-        self.result = str(index)
-        self.dialog.destroy()
-        
-    def select_custom(self):
-        url = self.entry.get().strip()
-        if url:
-            self.result = url
-        self.dialog.destroy()
-        
-    def close(self):
-        self.dialog.destroy()
-
-
-def prompt_camera_source():
-    """Display a GUI dialog asking for a camera index or stream URL, with console fallback."""
-    print("\n[CAMERA] Opening Change Camera dialog...")
-    print("Please select a camera index using the GUI buttons, or use a custom URL.")
-    print("If the GUI fails, you can enter the source in this terminal.")
-    
-    # Scan for connected camera devices
-    print("[CAMERA] Scanning for available camera devices...")
-    detected = []
-    try:
-        for i in range(5):
-            if i == 0:
-                temp_cap = cv2.VideoCapture(i)
-                if not temp_cap.isOpened():
-                    temp_cap.release()
-                    temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            else:
-                temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-                    
-            if temp_cap.isOpened():
-                detected.append(i)
-            
-            temp_cap.release()
-    except Exception as e:
-        print(f"[CAMERA] Error scanning cameras: {e}")
-        
-    if not detected:
-        # Fallback to Camera 0 (Laptop) if nothing detected
-        detected = [0]
-    print(f"[CAMERA] Detected active cameras: {detected}")
-
-    source = None
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        # Force the root window to be topmost
-        root.attributes("-topmost", True)
-        root.focus_force()
-        
-        # Display our custom selection dialog
-        dialog = CameraSelectionDialog(root, detected_cameras=detected)
-        source = dialog.result
-        root.destroy()
-    except Exception as e:
-        print(f"[CAMERA] Tkinter GUI dialog failed: {e}")
-        source = None
-
-    # Fallback to console input if dialog was cancelled, empty, or failed
-    if source is None or source.strip() == "":
-        print("\n--- CAMERA SWITCH CONSOLE INPUT ---")
-        print("Enter camera index (e.g. 0, 1) or IP stream URL (or press Enter to cancel):")
-        try:
-            console_val = input("Camera source: ").strip()
-            if console_val != "":
-                source = console_val
-        except (KeyboardInterrupt, EOFError):
-            print("\n[CAMERA] Console input cancelled.")
-            source = None
-
-    return source
 
 
 def draw_card(frame, x, y, width, height, bg_color=(20, 20, 20), alpha=0.7, border_color=None, border_thickness=1, corner_accents=False):
@@ -495,19 +303,8 @@ def draw_ui_overlay(frame, curls, servo_angles, tracker, client, state, grip=Non
     )
     CLICKABLE_REGIONS["pause_toggle"] = (10 + quit_w + 10, 10, 10 + quit_w + 10 + pause_w, 10 + pause_h)
 
-    # 3. Camera Badge (interactive button)
-    cam_str = str(config.CAMERA_INDEX)
-    if len(cam_str) > 15:
-        cam_str = cam_str[:12] + "..."
-    cam_w, cam_h = draw_badge(
-        frame, f"CAM: {cam_str}", 10 + quit_w + 10 + pause_w + 10, 10,
-        bg_color=COLOR_DARK_BG, text_color=COLOR_TEXT_BRIGHT,
-        border_color=COLOR_BORDER_ACCENT, font_scale=0.45, thickness=1
-    )
-    CLICKABLE_REGIONS["camera"] = (10 + quit_w + 10 + pause_w + 10, 10, 10 + quit_w + 10 + pause_w + 10 + cam_w, 10 + cam_h)
-
-    # 4. Title Badge
-    title_x = 10 + quit_w + 10 + pause_w + 10 + cam_w + 10
+    # 3. Title Badge
+    title_x = 10 + quit_w + 10 + pause_w + 10
     title_w, _ = draw_badge(
         frame, "INMOOV", title_x, 10,
         bg_color=(35, 25, 15), text_color=COLOR_TEXT_BRIGHT,
@@ -743,7 +540,7 @@ def draw_ui_overlay(frame, curls, servo_angles, tracker, client, state, grip=Non
     draw_card(frame, 0, taskbar_y, w, taskbar_h, bg_color=(10, 10, 10), alpha=0.9, border_color=None)
     
     # Draw taskbar text
-    controls = "MOUSE:Click badges to control | Keys: Q:Quit | P:Pause | R:Reconn | M:Mirror | H:Hold | C:Cam | Space:Wrist | G:Grip"
+    controls = "MOUSE:Click badges to control | Keys: Q:Quit | P:Pause | R:Reconn | M:Mirror | H:Hold | Space:Wrist | G:Grip"
     cv2.putText(frame, controls, (15, h - 11),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_BRIGHT, 1, cv2.LINE_AA)
 
@@ -820,7 +617,6 @@ def main():
         'held_curls': None,
         'held_servo_angles': None,
         'held_landmarks': None,
-        'camera_source_changed': False,
         'reconnect_requested': False,
         'quit_requested': False,
         'curls': {f: 0.0 for f in ["thumb", "index", "middle", "ring", "pinky"]},
@@ -842,8 +638,6 @@ def main():
                 elif region_name in ("pause_toggle", "pause_toggle_alert"):
                     state['paused'] = not state['paused']
                     print(f"[INFO] {'Paused' if state['paused'] else 'Resumed'} sending")
-                elif region_name == "camera":
-                    state['camera_source_changed'] = True
                 elif region_name == "reconnect":
                     state['reconnect_requested'] = True
                 elif region_name == "hold":
@@ -889,45 +683,6 @@ def main():
                 else:
                     print("[INFO] Reconnection failed")
 
-            if state['camera_source_changed']:
-                state['camera_source_changed'] = False
-                print("\n[CAMERA] Opening Change Camera dialog via mouse click...")
-                # Temporarily destroy the OpenCV window to prevent it from freezing on screen
-                try:
-                    cv2.destroyWindow(config.WINDOW_NAME)
-                    window_created = False
-                except cv2.error:
-                    pass
-
-                new_source = prompt_camera_source()
-                if new_source is not None and new_source.strip() != "":
-                    new_source = new_source.strip()
-                    if new_source.isdigit():
-                        camera_source = int(new_source)
-                    else:
-                        camera_source = new_source
-                    
-                    print(f"[CAMERA] Attempting to switch to source: {camera_source}")
-                    if isinstance(camera_source, int):
-                        if camera_source == 0:
-                            new_cap = cv2.VideoCapture(camera_source)
-                            if not new_cap.isOpened():
-                                new_cap = cv2.VideoCapture(camera_source, cv2.CAP_DSHOW)
-                        else:
-                            new_cap = cv2.VideoCapture(camera_source, cv2.CAP_DSHOW)
-                            if not new_cap.isOpened():
-                                new_cap = cv2.VideoCapture(camera_source)
-                    else:
-                        new_cap = cv2.VideoCapture(camera_source)
-                    if new_cap.isOpened():
-                        new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-                        new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-                        cap.release()
-                        cap = new_cap
-                        config.CAMERA_INDEX = camera_source
-                        print(f"[CAMERA] Successfully switched to camera: {camera_source}")
-                    else:
-                        print(f"[CAMERA] Error: Failed to open camera source: {camera_source}")
 
             ret, frame = cap.read()
             if not ret:
@@ -1012,8 +767,6 @@ def main():
             elif key == ord('m') or key == ord('M'):
                 state['mirror'] = not state['mirror']
                 print(f"[INFO] Mirror mode: {'ON' if state['mirror'] else 'OFF'}")
-            elif key == ord('c') or key == ord('C'):
-                state['camera_source_changed'] = True
             elif key == ord('h') or key == ord('H'):
                 if not state['hold_mode']:
                     # Attempting to LOCK — only allow if hand is currently detected

@@ -6,7 +6,7 @@ Every algorithm in the system, explained with math and visuals.
 
 ## 1. Finger Curl Detection (Index, Middle, Ring, Pinky)
 
-**File:** [hand_tracker.py:162–186](file:///c:/ESP32_HandRobot_Inmoov/python_client/hand_tracker.py#L162-L186)
+**File:** `python_client/hand_tracker.py` — `_compute_finger_curl()` (line 184–216)
 
 **Goal:** Measure how bent a finger is → output 0% (straight) to 100% (fist).
 
@@ -30,7 +30,7 @@ Given 3 points **A → B → C**, the angle at **B**:
 ```
 
 ```python
-# hand_tracker.py line 241-258
+# hand_tracker.py — _angle_between() (line 356-385)
 def _angle_between(a, b, c):
     ba = a - b
     bc = c - b
@@ -61,7 +61,7 @@ Curl:     0% (open)      ──────────────  100% (close
 
 ## 2. Thumb Curl Detection (Hybrid Method)
 
-**File:** [hand_tracker.py:188–221](file:///c:/ESP32_HandRobot_Inmoov/python_client/hand_tracker.py#L188-L221)
+**File:** `python_client/hand_tracker.py` — `_compute_thumb_curl()` (line 218–271)
 
 The thumb moves differently (opposition, not just flexion), so it uses **two methods averaged 50/50**:
 
@@ -93,28 +93,68 @@ curl = 0.5 × curl_dist + 0.5 × curl_angle
 
 ---
 
-## 3. Wrist Rotation
+## 3. Wrist Rotation (3D Palm Roll Extraction)
 
-**File:** [hand_tracker.py:223–238](file:///c:/ESP32_HandRobot_Inmoov/python_client/hand_tracker.py#L223-L238)
+**File:** `python_client/hand_tracker.py` — `_compute_wrist_rotation()` (line 273–354)
+
+**Goal:** Detect forearm rotation (pronation/supination) — like turning a doorknob — and map it to the wrist servo (0°–180°).
+
+**Challenge:** Simply measuring the wrist angle in 2D would conflate arm tilt with forearm roll. We isolate the **roll component** in 3D.
+
+### Step 1 — Longitudinal axis
+
+```
+â = normalize(middle_MCP − wrist)   →   points "up" along the hand
+```
+
+### Step 2 — Cross-palm vector
+
+```
+c⃗ = pinky_MCP − index_MCP   →   points across the palm
+```
+
+### Step 3 — Project onto perpendicular plane
+
+Remove the component along the hand axis so we only see the roll:
+
+```
+c⃗_perp = c⃗ − (c⃗ · â) × â
+```
+
+### Step 4 — Build reference axes (Gram-Schmidt)
+
+```
+r̂ = normalize( (1,0,0) − ((1,0,0)·â) × â )   →   "camera-right" reference
+û = â × r̂                                        →   "camera-up" reference
+```
+
+If the hand axis is nearly parallel to camera-right, fall back to camera-up (0,−1,0).
+
+### Step 5 — Compute roll angle
+
+```
+roll = atan2(c⃗_perp · û, c⃗_perp · r̂)
+```
+
+### Step 6 — Map to servo using cosine
 
 ```python
-dx = middle_MCP.x - wrist.x
-dy = middle_MCP.y - wrist.y
-angle_rad = atan2(dx, -dy)        # Angle of hand from vertical
-servo = interp(degrees(angle_rad), [-90°, 90°], [0°, 180°])
+servo_angle = (cos(roll_rad) + 1.0) × 90.0    # Range: 0 … 180
 ```
 
-```
-  Hand tilted left (-90°) → servo 0°
-  Hand vertical (0°)      → servo 90°
-  Hand tilted right (90°) → servo 180°
-```
+| Hand orientation | roll (rad) | cos(roll) | Servo angle |
+|-----------------|------------|-----------|-------------|
+| Palm facing camera | 0 | 1.0 | **180°** |
+| Hand sideways | ±π/2 | 0.0 | **90°** |
+| Back of hand | ±π | −1.0 | **0°** |
+
+The cosine mapping provides a smooth, continuous transition with no discontinuity at the ±180° wrap-around.
 
 ---
 
 ## 4. EMA Smoothing
 
-**File:** [hand_tracker.py:156–158](file:///c:/ESP32_HandRobot_Inmoov/python_client/hand_tracker.py#L156-L158)
+**File:** `python_client/hand_tracker.py` — `process_frame()` (line 177–180)
 
 Raw MediaPipe values jitter frame-to-frame. **Exponential Moving Average** smooths them:
 
@@ -141,7 +181,7 @@ Smooth:  41    54    63    70    74    77    79
 
 ## 5. Grip Protection — Compliance Zone (Cosine Easing)
 
-**File:** [main.py:83–124](file:///c:/ESP32_HandRobot_Inmoov/python_client/main.py#L83-L124)
+**File:** `python_client/main.py` — `curl_to_servo_angle()` (line 88–129) and `GripController` (line 33–85)
 
 **Goal:** Prevent crushing objects by capping how far fingers can close, with a smooth deceleration zone.
 
@@ -151,8 +191,8 @@ Smooth:  41    54    63    70    74    77    79
 Curl %:  0%  ─────────────  55%  ─────────  75%  ─── 100%
          │   FREE ZONE      │  COMPLIANCE   │  BLOCKED
          │   (1:1 mapping)  │  (eased)      │  (capped)
-                             ↑               ↑
-                     (max_curl - compliance)  max_curl (= grip strength)
+                              ↑               ↑
+                      (max_curl - compliance)  max_curl (= grip strength)
 ```
 
 Example: NORMAL mode → strength=75%, compliance_zone=20%
@@ -189,7 +229,7 @@ else:
 
 ## 6. ESP32 Communication Filters
 
-**File:** [esp32_client.py:54–96](file:///c:/ESP32_HandRobot_Inmoov/python_client/esp32_client.py#L54-L96)
+**File:** `python_client/esp32_client.py` — `send_all_servos()` (line 54–102)
 
 ### Rate limiter
 
@@ -214,7 +254,7 @@ Prevents sending identical or nearly-identical commands.
 
 ## 7. ESP32 Firmware — Smooth Servo Interpolation
 
-**File:** [esp32_hand_controller.ino:93–134](file:///c:/ESP32_HandRobot_Inmoov/esp32_firmware/esp32_hand_controller/esp32_hand_controller.ino#L93-L134)
+**File:** `esp32_firmware/esp32_hand_controller/esp32_hand_controller.ino` — `updateServos()` (line 86–128)
 
 Runs every **20ms**. Instead of jumping to the target angle, the servo moves **at most 8° per step**:
 
@@ -252,7 +292,7 @@ Speed (°/step):       8     6     4     2     1
 
 ## 8. Hold/Lock Algorithm
 
-**File:** [main.py:345–366](file:///c:/ESP32_HandRobot_Inmoov/python_client/main.py#L345-L366), [main.py:411–421](file:///c:/ESP32_HandRobot_Inmoov/python_client/main.py#L411-L421)
+**File:** `python_client/main.py` — keyboard handler (line 1017–1034), mouse handler (line 849–864), main loop (line 948–972)
 
 ```mermaid
 flowchart TD
@@ -270,13 +310,13 @@ flowchart TD
     I -->|YES → UNLOCK| K["held_curls = None\nheld_servo_angles = None\nhold_mode = False"]
 ```
 
-**Key insight:** The hold check (line 346) runs **before** the hand-detection check. When locked, the entire live-tracking/reset path is bypassed. That's why it's independent from reset.
+**Key insight:** The hold check runs **before** the hand-detection check. When locked, the entire live-tracking/reset path is bypassed.
 
 ---
 
 ## 9. PCA9685 PWM Tick Conversion
 
-**File:** [esp32_hand_controller.ino:73–76](file:///c:/ESP32_HandRobot_Inmoov/esp32_firmware/esp32_hand_controller/esp32_hand_controller.ino#L73-L76)
+**File:** `esp32_firmware/esp32_hand_controller/esp32_hand_controller.ino` — `setServoImmediate()` (line 75–78)
 
 ```
 angle (0-180°)  →  PWM ticks (102-512)  →  pulse width (500-2500µs)
@@ -291,7 +331,7 @@ angle (0-180°)  →  PWM ticks (102-512)  →  pulse width (500-2500µs)
 ```
 
 ```cpp
-pwm_tick = map(angle, 0, 180, 102, 512);
+pwm_tick = (angle * (512 - 102)) / 180 + 102;
 pwm.setPWM(channel, 0, pwm_tick);
 ```
 
@@ -315,7 +355,7 @@ Curl Computation (per finger)
     │
     ├─ Fingers: joint angles → weighted avg → map to 0-100%
     ├─ Thumb: distance + angle hybrid → 0-100%
-    ├─ Wrist: atan2 → 0-180°
+    ├─ Wrist: 3D palm roll → cos mapping → 0-180°
     │
     ▼
 EMA Smoothing (α = 0.35)
