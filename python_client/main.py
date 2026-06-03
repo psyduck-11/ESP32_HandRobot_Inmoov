@@ -16,10 +16,8 @@ Controls:
 
 import sys
 import time
+import math
 import cv2
-import numpy as np
-import tkinter as tk
-from tkinter import simpledialog
 
 import config
 from hand_tracker import HandTracker
@@ -27,6 +25,12 @@ from esp32_client import create_client
 
 # Global registry for mouse-clickable UI areas
 CLICKABLE_REGIONS = {}
+
+# Pre-computed constants to avoid per-frame allocations
+_FINGER_NAMES = ("thumb", "index", "middle", "ring", "pinky")
+_ALL_CHANNELS = ("thumb", "index", "middle", "ring", "pinky", "wrist")
+_ZERO_CURLS = {f: 0.0 for f in _FINGER_NAMES}
+_DEFAULT_SERVO_ANGLES = {f: config.SERVO_MIN[f] for f in _FINGER_NAMES}
 
 
 # ---- Grip Protection State ----
@@ -81,257 +85,66 @@ class GripController:
     def adjust_strength(self, delta: int):
         """Fine-adjust grip strength by delta percent."""
         current = self.get_strength()
-        self._custom_strength = float(np.clip(current + delta, 5, 100))
+        self._custom_strength = float(max(5, min(100, current + delta)))
         return self._custom_strength
+
+
+def _lerp_clamp(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float:
+    """Linear interpolation with clamping — pure Python, no numpy overhead."""
+    t = (value - in_min) / (in_max - in_min) if in_max != in_min else 0.0
+    t = max(0.0, min(1.0, t))
+    return out_min + t * (out_max - out_min)
 
 
 def curl_to_servo_angle(curl_pct: float, finger: str, grip: GripController) -> int:
     """
     Convert curl percentage (0–100) to servo angle (degrees).
-    Applies grip strength limiting: the finger cannot close beyond
-    (grip_strength)% of its full range.
-
-    Compliance zone: as the finger approaches its grip limit,
-    the mapped angle is progressively scaled back, simulating
-    a "soft stop" to prevent sudden force spikes.
+    Applies grip strength limiting and compliance zone easing.
+    Uses pure Python math to avoid numpy scalar overhead.
     """
     min_angle = config.SERVO_MIN[finger]
     max_angle = config.SERVO_MAX[finger]
     inverted = config.SERVO_INVERTED[finger]
-    strength = grip.get_strength(finger)
-
-    # Apply grip strength: limit the effective curl percentage
-    # strength=75 means fingers can only close to 75% of their full range
-    max_curl = strength  # e.g., 75% of full range
+    max_curl = grip.get_strength(finger)
 
     # Compliance zone: soft deceleration near the grip limit
-    # Within the compliance zone, progressively reduce the curl
     compliance = grip.compliance_zone
     if compliance > 0 and curl_pct > (max_curl - compliance):
         if curl_pct >= max_curl:
-            # At or past limit — hard cap
             effective_curl = max_curl
         else:
-            # Within compliance zone — ease into limit
-            # Use cosine easing for smooth deceleration
             zone_progress = (curl_pct - (max_curl - compliance)) / compliance
-            easing = 0.5 * (1 - np.cos(np.pi * zone_progress))
+            easing = 0.5 * (1.0 - math.cos(math.pi * zone_progress))
             effective_curl = (max_curl - compliance) + compliance * easing
     else:
         effective_curl = min(curl_pct, max_curl)
 
-    # Map effective curl to servo angle
+    # Map effective curl to servo angle (pure Python lerp)
     if inverted:
-        angle = np.interp(effective_curl, [0, 100], [max_angle, min_angle])
+        angle = _lerp_clamp(effective_curl, 0.0, 100.0, float(max_angle), float(min_angle))
     else:
-        angle = np.interp(effective_curl, [0, 100], [min_angle, max_angle])
+        angle = _lerp_clamp(effective_curl, 0.0, 100.0, float(min_angle), float(max_angle))
 
-    return int(np.clip(angle, min(min_angle, max_angle), max(min_angle, max_angle)))
+    lo = min(min_angle, max_angle)
+    hi = max(min_angle, max_angle)
+    return int(max(lo, min(hi, angle)))
 
 
 def wrist_to_servo_angle(wrist_deg: float) -> int:
-    """Convert wrist rotation (0–180) to servo angle."""
+    """Convert wrist rotation (0–180) to servo angle. Pure Python math."""
     min_angle = config.SERVO_MIN["wrist"]
     max_angle = config.SERVO_MAX["wrist"]
     inverted = config.SERVO_INVERTED["wrist"]
 
     if inverted:
-        angle = np.interp(wrist_deg, [0, 180], [max_angle, min_angle])
+        angle = _lerp_clamp(wrist_deg, 0.0, 180.0, float(max_angle), float(min_angle))
     else:
-        angle = np.interp(wrist_deg, [0, 180], [min_angle, max_angle])
+        angle = _lerp_clamp(wrist_deg, 0.0, 180.0, float(min_angle), float(max_angle))
 
-    return int(np.clip(angle, min(min_angle, max_angle), max(min_angle, max_angle)))
+    lo = min(min_angle, max_angle)
+    hi = max(min_angle, max_angle)
+    return int(max(lo, min(hi, angle)))
 
-
-class CameraSelectionDialog:
-    """A custom Tkinter dialog that presents clickable camera source buttons."""
-    def __init__(self, parent, detected_cameras, title="Select Camera Source"):
-        self.parent = parent
-        self.result = None
-        
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title(title)
-        self.dialog.geometry("380x320")
-        self.dialog.resizable(False, False)
-        
-        # Style details
-        self.dialog.configure(bg="#2d2d2d")
-        
-        # Center the dialog
-        self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f"+{x}+{y}")
-        
-        # Make topmost and modal
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
-        self.dialog.focus_set()
-        
-        # Header Label
-        lbl = tk.Label(
-            self.dialog, 
-            text="Select Camera Source", 
-            font=("Helvetica", 14, "bold"), 
-            bg="#2d2d2d", 
-            fg="#00ff80", 
-            pady=10
-        )
-        lbl.pack()
-        
-        # Description Label
-        lbl_desc = tk.Label(
-            self.dialog, 
-            text="Choose a detected camera or enter a custom stream URL:", 
-            font=("Helvetica", 9), 
-            bg="#2d2d2d", 
-            fg="#cccccc", 
-            pady=5
-        )
-        lbl_desc.pack()
-        
-        # Grid Frame for buttons
-        btn_frame = tk.Frame(self.dialog, bg="#2d2d2d")
-        btn_frame.pack(pady=10)
-        
-        # Camera options based on detection
-        for idx, cam_idx in enumerate(detected_cameras):
-            if cam_idx == 0:
-                btn_text = "Camera 0 (Laptop)"
-            else:
-                btn_text = f"Camera {cam_idx} (Detected)"
-                
-            btn = tk.Button(
-                btn_frame, 
-                text=btn_text, 
-                font=("Helvetica", 9, "bold"),
-                width=16, 
-                height=2,
-                bg="#3a3a3a",
-                fg="#ffffff",
-                activebackground="#00ff80",
-                activeforeground="#2d2d2d",
-                relief=tk.FLAT,
-                command=lambda val=cam_idx: self.select_source(val)
-            )
-            btn.grid(row=idx//2, column=idx%2, padx=10, pady=5)
-            
-        # Custom URL Frame
-        custom_frame = tk.Frame(self.dialog, bg="#2d2d2d", pady=5)
-        custom_frame.pack()
-        
-        lbl_custom = tk.Label(custom_frame, text="Custom URL:", font=("Helvetica", 9), bg="#2d2d2d", fg="#ffffff")
-        lbl_custom.pack(side=tk.LEFT, padx=5)
-        
-        self.entry = tk.Entry(custom_frame, width=22, font=("Helvetica", 10), bg="#3a3a3a", fg="#ffffff", insertbackground="white", relief=tk.FLAT)
-        self.entry.pack(side=tk.LEFT, padx=5)
-        self.entry.bind("<Return>", lambda event: self.select_custom())
-        
-        btn_use = tk.Button(
-            custom_frame, 
-            text="Use URL", 
-            font=("Helvetica", 9, "bold"),
-            bg="#0080ff",
-            fg="#ffffff",
-            activebackground="#00ff80",
-            relief=tk.FLAT,
-            command=self.select_custom
-        )
-        btn_use.pack(side=tk.LEFT, padx=5)
-        
-        # Cancel Button
-        btn_cancel = tk.Button(
-            self.dialog, 
-            text="Cancel", 
-            font=("Helvetica", 10),
-            width=15, 
-            bg="#555555",
-            fg="#ffffff",
-            activebackground="#ff5555",
-            relief=tk.FLAT,
-            command=self.close
-        )
-        btn_cancel.pack(pady=10)
-        
-        self.dialog.protocol("WM_DELETE_WINDOW", self.close)
-        self.dialog.wait_window()
-        
-    def select_source(self, index):
-        self.result = str(index)
-        self.dialog.destroy()
-        
-    def select_custom(self):
-        url = self.entry.get().strip()
-        if url:
-            self.result = url
-        self.dialog.destroy()
-        
-    def close(self):
-        self.dialog.destroy()
-
-
-def prompt_camera_source():
-    """Display a GUI dialog asking for a camera index or stream URL, with console fallback."""
-    print("\n[CAMERA] Opening Change Camera dialog...")
-    print("Please select a camera index using the GUI buttons, or use a custom URL.")
-    print("If the GUI fails, you can enter the source in this terminal.")
-    
-    # Scan for connected camera devices
-    print("[CAMERA] Scanning for available camera devices...")
-    detected = []
-    try:
-        for i in range(5):
-            if i == 0:
-                temp_cap = cv2.VideoCapture(i)
-                if not temp_cap.isOpened():
-                    temp_cap.release()
-                    temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            else:
-                temp_cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-                    
-            if temp_cap.isOpened():
-                detected.append(i)
-            
-            temp_cap.release()
-    except Exception as e:
-        print(f"[CAMERA] Error scanning cameras: {e}")
-        
-    if not detected:
-        # Fallback to Camera 0 (Laptop) if nothing detected
-        detected = [0]
-    print(f"[CAMERA] Detected active cameras: {detected}")
-
-    source = None
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        # Force the root window to be topmost
-        root.attributes("-topmost", True)
-        root.focus_force()
-        
-        # Display our custom selection dialog
-        dialog = CameraSelectionDialog(root, detected_cameras=detected)
-        source = dialog.result
-        root.destroy()
-    except Exception as e:
-        print(f"[CAMERA] Tkinter GUI dialog failed: {e}")
-        source = None
-
-    # Fallback to console input if dialog was cancelled, empty, or failed
-    if source is None or source.strip() == "":
-        print("\n--- CAMERA SWITCH CONSOLE INPUT ---")
-        print("Enter camera index (e.g. 0, 1) or IP stream URL (or press Enter to cancel):")
-        try:
-            console_val = input("Camera source: ").strip()
-            if console_val != "":
-                source = console_val
-        except (KeyboardInterrupt, EOFError):
-            print("\n[CAMERA] Console input cancelled.")
-            source = None
-
-    return source
 
 
 def draw_card(frame, x, y, width, height, bg_color=(20, 20, 20), alpha=0.7, border_color=None, border_thickness=1, corner_accents=False):
@@ -345,12 +158,11 @@ def draw_card(frame, x, y, width, height, bg_color=(20, 20, 20), alpha=0.7, bord
     if x2 <= x1 or y2 <= y1:
         return
     
-    # Blending the card background
+    # Blending the card background — only allocate a small ROI-sized overlay
     roi = frame[y1:y2, x1:x2]
-    bg = np.zeros_like(roi)
-    bg[:] = bg_color
-    blend = cv2.addWeighted(bg, alpha, roi, 1.0 - alpha, 0)
-    frame[y1:y2, x1:x2] = blend
+    overlay = roi.copy()
+    cv2.rectangle(overlay, (0, 0), (x2 - x1, y2 - y1), bg_color, -1)
+    cv2.addWeighted(overlay, alpha, roi, 1.0 - alpha, 0, roi)
     
     # Draw border
     if border_color is not None:
@@ -436,8 +248,7 @@ def draw_hand_pose_thumbnail(frame, landmarks, x, y, width, height, color=(0, 25
         my = int(offset_y + (py - min_y) * scale)
         mapped_pts.append((mx, my))
         
-    # Draw connections
-    from hand_tracker import HandTracker
+    # Draw connections (HandTracker imported at module level)
     for start_idx, end_idx in HandTracker.HAND_CONNECTIONS:
         pt1 = mapped_pts[start_idx]
         pt2 = mapped_pts[end_idx]
@@ -495,19 +306,8 @@ def draw_ui_overlay(frame, curls, servo_angles, tracker, client, state, grip=Non
     )
     CLICKABLE_REGIONS["pause_toggle"] = (10 + quit_w + 10, 10, 10 + quit_w + 10 + pause_w, 10 + pause_h)
 
-    # 3. Camera Badge (interactive button)
-    cam_str = str(config.CAMERA_INDEX)
-    if len(cam_str) > 15:
-        cam_str = cam_str[:12] + "..."
-    cam_w, cam_h = draw_badge(
-        frame, f"CAM: {cam_str}", 10 + quit_w + 10 + pause_w + 10, 10,
-        bg_color=COLOR_DARK_BG, text_color=COLOR_TEXT_BRIGHT,
-        border_color=COLOR_BORDER_ACCENT, font_scale=0.45, thickness=1
-    )
-    CLICKABLE_REGIONS["camera"] = (10 + quit_w + 10 + pause_w + 10, 10, 10 + quit_w + 10 + pause_w + 10 + cam_w, 10 + cam_h)
-
-    # 4. Title Badge
-    title_x = 10 + quit_w + 10 + pause_w + 10 + cam_w + 10
+    # 3. Title Badge
+    title_x = 10 + quit_w + 10 + pause_w + 10
     title_w, _ = draw_badge(
         frame, "INMOOV", title_x, 10,
         bg_color=(35, 25, 15), text_color=COLOR_TEXT_BRIGHT,
@@ -743,7 +543,7 @@ def draw_ui_overlay(frame, curls, servo_angles, tracker, client, state, grip=Non
     draw_card(frame, 0, taskbar_y, w, taskbar_h, bg_color=(10, 10, 10), alpha=0.9, border_color=None)
     
     # Draw taskbar text
-    controls = "MOUSE:Click badges to control | Keys: Q:Quit | P:Pause | R:Reconn | M:Mirror | H:Hold | C:Cam | Space:Wrist | G:Grip"
+    controls = "MOUSE:Click badges to control | Keys: Q:Quit | P:Pause | R:Reconn | M:Mirror | H:Hold | Space:Wrist | G:Grip"
     cv2.putText(frame, controls, (15, h - 11),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_TEXT_BRIGHT, 1, cv2.LINE_AA)
 
@@ -782,30 +582,18 @@ def main():
         print("[INIT] Could not connect to ESP32 — running in preview mode")
         print("       (Hand tracking will work, servo commands won't be sent)")
 
-    # Initialize camera (robust fallback for both built-in and virtual cameras)
-    cam_source = config.CAMERA_INDEX
-    if isinstance(cam_source, str) and cam_source.isdigit():
-        cam_source = int(cam_source)
-
-    if isinstance(cam_source, int):
-        if cam_source == 0:
-            cap = cv2.VideoCapture(cam_source)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(cam_source, cv2.CAP_DSHOW)
-        else:
-            cap = cv2.VideoCapture(cam_source, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(cam_source)
-    else:
-        cap = cv2.VideoCapture(cam_source)
+    # Initialize laptop camera (index 0)
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
 
     if not cap.isOpened():
-        print("[ERROR] Cannot open camera!")
+        print("[ERROR] Cannot open laptop camera!")
         sys.exit(1)
 
-    print(f"[INIT] Camera opened (index {config.CAMERA_INDEX})")
+    print("[INIT] Laptop camera opened (index 0)")
     print()
     print("Controls: Q=Quit, P=Pause, R=Reconnect, M=Mirror, H=Hold, Space=Wrist, G=Grip, +/-=Strength")
     print("-" * 60)
@@ -820,7 +608,6 @@ def main():
         'held_curls': None,
         'held_servo_angles': None,
         'held_landmarks': None,
-        'camera_source_changed': False,
         'reconnect_requested': False,
         'quit_requested': False,
         'curls': {f: 0.0 for f in ["thumb", "index", "middle", "ring", "pinky"]},
@@ -842,8 +629,7 @@ def main():
                 elif region_name in ("pause_toggle", "pause_toggle_alert"):
                     state['paused'] = not state['paused']
                     print(f"[INFO] {'Paused' if state['paused'] else 'Resumed'} sending")
-                elif region_name == "camera":
-                    state['camera_source_changed'] = True
+
                 elif region_name == "reconnect":
                     state['reconnect_requested'] = True
                 elif region_name == "hold":
@@ -889,45 +675,6 @@ def main():
                 else:
                     print("[INFO] Reconnection failed")
 
-            if state['camera_source_changed']:
-                state['camera_source_changed'] = False
-                print("\n[CAMERA] Opening Change Camera dialog via mouse click...")
-                # Temporarily destroy the OpenCV window to prevent it from freezing on screen
-                try:
-                    cv2.destroyWindow(config.WINDOW_NAME)
-                    window_created = False
-                except cv2.error:
-                    pass
-
-                new_source = prompt_camera_source()
-                if new_source is not None and new_source.strip() != "":
-                    new_source = new_source.strip()
-                    if new_source.isdigit():
-                        camera_source = int(new_source)
-                    else:
-                        camera_source = new_source
-                    
-                    print(f"[CAMERA] Attempting to switch to source: {camera_source}")
-                    if isinstance(camera_source, int):
-                        if camera_source == 0:
-                            new_cap = cv2.VideoCapture(camera_source)
-                            if not new_cap.isOpened():
-                                new_cap = cv2.VideoCapture(camera_source, cv2.CAP_DSHOW)
-                        else:
-                            new_cap = cv2.VideoCapture(camera_source, cv2.CAP_DSHOW)
-                            if not new_cap.isOpened():
-                                new_cap = cv2.VideoCapture(camera_source)
-                    else:
-                        new_cap = cv2.VideoCapture(camera_source)
-                    if new_cap.isOpened():
-                        new_cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-                        new_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-                        cap.release()
-                        cap = new_cap
-                        config.CAMERA_INDEX = camera_source
-                        print(f"[CAMERA] Successfully switched to camera: {camera_source}")
-                    else:
-                        print(f"[CAMERA] Error: Failed to open camera source: {camera_source}")
 
             ret, frame = cap.read()
             if not ret:
@@ -953,7 +700,7 @@ def main():
                 # LIVE: compute from hand tracking
                 servo_angles = {}
                 if tracker.hand_detected:
-                    for finger in ["thumb", "index", "middle", "ring", "pinky"]:
+                    for finger in _FINGER_NAMES:
                         servo_angles[finger] = curl_to_servo_angle(curls[finger], finger, grip)
 
                     if state['wrist_enabled']:
@@ -961,10 +708,10 @@ def main():
                     else:
                         servo_angles["wrist"] = 90  # Neutral
                 else:
-                    # No hand detected — reset to open
-                    curls = {f: 0.0 for f in ["thumb", "index", "middle", "ring", "pinky"]}
+                    # No hand detected — use pre-computed defaults
+                    curls = dict(_ZERO_CURLS)
                     curls["wrist"] = 90.0
-                    servo_angles = {f: config.SERVO_MIN[f] for f in ["thumb", "index", "middle", "ring", "pinky"]}
+                    servo_angles = dict(_DEFAULT_SERVO_ANGLES)
                     servo_angles["wrist"] = 90
 
                 # Save live values so that mouse click can capture them
@@ -1012,8 +759,7 @@ def main():
             elif key == ord('m') or key == ord('M'):
                 state['mirror'] = not state['mirror']
                 print(f"[INFO] Mirror mode: {'ON' if state['mirror'] else 'OFF'}")
-            elif key == ord('c') or key == ord('C'):
-                state['camera_source_changed'] = True
+
             elif key == ord('h') or key == ord('H'):
                 if not state['hold_mode']:
                     # Attempting to LOCK — only allow if hand is currently detected
