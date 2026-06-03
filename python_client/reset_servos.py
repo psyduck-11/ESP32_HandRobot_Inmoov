@@ -8,6 +8,7 @@ Connects to the ESP32 using the settings in config.py (serial or WiFi),
 sends the NEUTRAL_ANGLE command for all finger channels, then exits.
 """
 
+from numpy._typing import _nested_sequence
 import sys
 import time
 
@@ -18,7 +19,8 @@ import config
 from esp32_client import create_client
 
 
-NEUTRAL_ANGLE = 0
+NEUTRAL_ANGLE = 90
+
 
 
 def main():
@@ -51,8 +53,7 @@ def main():
         "index":  NEUTRAL_ANGLE,
         "middle": NEUTRAL_ANGLE,
         "ring":   NEUTRAL_ANGLE,
-        "pinky":  NEUTRAL_ANGLE,
-        "wrist":  NEUTRAL_ANGLE,
+        "pinky":  NEUTRAL_ANGLE
     }
 
     # Send all servos to neutral using the public API with force=True

@@ -11,7 +11,7 @@ Adjust these values to match your hardware setup.
 COMM_MODE = "serial"
 
 # --- Serial Settings (for wired USB connection) ---
-SERIAL_PORT = "COM7"        # Change to your ESP32's COM port (check Device Manager)
+SERIAL_PORT = "COM6"        # Change to your ESP32's COM port (check Device Manager)
 SERIAL_BAUD = 115200
 
 # --- WiFi Settings (for wireless TCP connection) ---
@@ -50,6 +50,23 @@ SEND_RATE_HZ = 30
 
 # Minimum angle change (degrees) to trigger a send — reduces unnecessary traffic
 DEADBAND_DEGREES = 2
+
+# --- Anti-Shaking (Servo Stabilisation) ---
+# Per-servo output deadband: a new servo angle is only accepted if it differs
+# from the last sent angle by more than this many degrees. Prevents 1-2° jitter
+# from reaching the servos. Set to 0 to disable.
+SERVO_DEADBAND_DEGREES = 3
+
+# Velocity-adaptive smoothing: when finger movement is below this curl-%
+# threshold between frames, the EMA alpha is reduced (= heavier smoothing)
+# to kill micro-jitter. Above this threshold, full EMA_ALPHA is used so
+# intentional movements stay responsive.
+ADAPTIVE_SMOOTH_THRESHOLD = 4.0   # curl-% change per frame
+ADAPTIVE_SMOOTH_ALPHA_SLOW = 0.12 # heavy smoothing for near-stationary fingers
+
+# Snap-to-rest: when a finger's smoothed curl is below this threshold,
+# snap it to exactly 0% to avoid tiny oscillations around the open position.
+SNAP_TO_REST_THRESHOLD = 2.5  # curl-%
 
 # =============================================================================
 #  GRIP PROTECTION SETTINGS
@@ -95,12 +112,12 @@ SERVO_CHANNELS = {
 
 # Servo angle when finger is fully OPEN (extended)
 SERVO_MIN = {
-    "thumb":  0,
-    "index":  0,
-    "middle": 0,
-    "ring":   0,
-    "pinky":  0,
-    "wrist":  0,
+    "thumb":  90,
+    "index":  90,
+    "middle": 90,
+    "ring":   90,
+    "pinky":  90,
+    "wrist":  90,
 }
 
 # Servo angle when finger is fully CLOSED (curled)

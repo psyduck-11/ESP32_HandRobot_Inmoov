@@ -62,6 +62,11 @@
 // Update interval in milliseconds
 #define UPDATE_INTERVAL_MS 20
 
+// Anti-shaking: ignore target changes smaller than this many degrees.
+// Prevents micro-PWM updates from causing servo buzzing/oscillation.
+// Set 0 to disable. Recommended: 2 for MG996R.
+#define SERVO_DEADBAND_DEG  2
+
 // =============================================================================
 //  Grip Protection / Compliance Settings
 // =============================================================================

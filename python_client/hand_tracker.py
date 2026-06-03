@@ -174,10 +174,27 @@ class HandTracker:
 
         self.raw_curls = dict(raw)
 
-        # Apply EMA smoothing
-        alpha = config.EMA_ALPHA
+        # Apply velocity-adaptive EMA smoothing (anti-shaking)
+        # When a channel is nearly stationary, use heavier smoothing to kill
+        # micro-jitter.  When it's moving intentionally, use full alpha for
+        # responsiveness.
+        alpha_fast = config.EMA_ALPHA
+        alpha_slow = getattr(config, 'ADAPTIVE_SMOOTH_ALPHA_SLOW', 0.12)
+        threshold = getattr(config, 'ADAPTIVE_SMOOTH_THRESHOLD', 4.0)
+        snap_rest = getattr(config, 'SNAP_TO_REST_THRESHOLD', 2.5)
+
         for key in self._smoothed:
+            delta = abs(raw[key] - self._smoothed[key])
+            # Pick alpha based on how much the value is changing
+            alpha = alpha_fast if delta > threshold else alpha_slow
             self._smoothed[key] = alpha * raw[key] + (1 - alpha) * self._smoothed[key]
+
+        # Snap-to-rest: clamp near-zero finger curls to exactly 0
+        # to prevent idle oscillation around the open position.
+        # (Skip wrist — its rest position is 90°, not 0°)
+        for finger in ("thumb", "index", "middle", "ring", "pinky"):
+            if self._smoothed[finger] < snap_rest:
+                self._smoothed[finger] = 0.0
 
         return dict(self._smoothed)
 

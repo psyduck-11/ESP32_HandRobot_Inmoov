@@ -96,6 +96,14 @@ void updateServos() {
       continue;
     }
 
+    // Anti-shaking deadband: ignore small target changes that would
+    // only produce servo buzzing without meaningful movement.
+#if SERVO_DEADBAND_DEG > 0
+    if (abs(effectiveTarget - currentAngle[i]) < SERVO_DEADBAND_DEG) {
+      continue;
+    }
+#endif
+
     int diff = effectiveTarget - currentAngle[i];
 
 #if SERVO_SPEED_LIMIT > 0
