@@ -42,7 +42,7 @@ unsigned long lastLedToggle = 0;
 bool ledState = false;
 
 // ---- Grip Protection ----
-int gripStrength = 75;         // 0-100% — limits max closing angle
+int gripStrength = 100;        // 0-100% — limits max closing angle
 int maxServoAngle[NUM_SERVOS]; // Computed max angle per servo based on grip
 bool stallDetected[NUM_SERVOS] = {false};
 
@@ -438,7 +438,7 @@ void setup() {
   }
 
   // Initialize grip protection
-  gripStrength = 75; // Default: NORMAL mode
+  gripStrength = 100; // Default: FIRM mode (full range)
   updateGripLimits();
   Serial.print("[OK] Grip protection active (strength: ");
   Serial.print(gripStrength);

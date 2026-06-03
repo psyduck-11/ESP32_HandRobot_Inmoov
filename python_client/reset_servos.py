@@ -1,11 +1,11 @@
 """
-Reset Servos — Sets all 6 servos (5 fingers + wrist) to 90° (neutral position).
+Reset Servos — Sets all 6 servos (5 fingers + wrist) to a specified angle.
 
 Usage:
     python reset_servos.py
 
 Connects to the ESP32 using the settings in config.py (serial or WiFi),
-sends the 90° command for all finger channels, then exits.
+sends the NEUTRAL_ANGLE command for all finger channels, then exits.
 """
 
 import sys
@@ -18,12 +18,12 @@ import config
 from esp32_client import create_client
 
 
-NEUTRAL_ANGLE = 90
+NEUTRAL_ANGLE = 0
 
 
 def main():
     print("=" * 50)
-    print("  InMoov Hand — Reset All Servos to 90°")
+    print(f"  InMoov Hand — Reset All Servos to {NEUTRAL_ANGLE}°")
     print("=" * 50)
     print(f"  Mode : {config.COMM_MODE.upper()}")
     if config.COMM_MODE.lower() == "serial":
@@ -45,7 +45,7 @@ def main():
     else:
         print("[!] No PONG received — continuing anyway.")
 
-    # Build the angle dict — all 6 servos (5 fingers + wrist) to 90°
+    # Build the angle dict — all 6 servos (5 fingers + wrist) to NEUTRAL_ANGLE
     angles = {
         "thumb":  NEUTRAL_ANGLE,
         "index":  NEUTRAL_ANGLE,
@@ -61,7 +61,7 @@ def main():
         client.send_all_servos(angles, force=True)
         print(f"[✓] Sent: F{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},"
               f"{NEUTRAL_ANGLE},{NEUTRAL_ANGLE},{NEUTRAL_ANGLE}")
-        print("[✓] All servos set to 90°.")
+        print(f"[✓] All servos set to {NEUTRAL_ANGLE}°.")
     except Exception as e:
         print(f"[!] Send failed: {e}")
         sys.exit(1)

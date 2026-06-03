@@ -259,13 +259,13 @@ class HandTracker:
         else:
             curl_dist = (0.7 - normalized_dist) / (0.7 - 0.15) * 100.0
 
-        # curl_angle: [60, 160] -> [100, 0]
-        if angle_mcp <= 60.0:
+        # curl_angle: [90, 160] -> [100, 0] (Amplified from 60)
+        if angle_mcp <= 90.0:
             curl_angle = 100.0
         elif angle_mcp >= 160.0:
             curl_angle = 0.0
         else:
-            curl_angle = (160.0 - angle_mcp) / (160.0 - 60.0) * 100.0
+            curl_angle = (160.0 - angle_mcp) / (160.0 - 90.0) * 100.0
 
         curl = 0.5 * curl_dist + 0.5 * curl_angle
         return max(0.0, min(100.0, curl))

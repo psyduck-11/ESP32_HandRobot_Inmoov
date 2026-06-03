@@ -18,6 +18,7 @@ import sys
 import time
 import math
 import cv2
+import numpy as np
 
 import config
 from hand_tracker import HandTracker
@@ -31,6 +32,32 @@ _FINGER_NAMES = ("thumb", "index", "middle", "ring", "pinky")
 _ALL_CHANNELS = ("thumb", "index", "middle", "ring", "pinky", "wrist")
 _ZERO_CURLS = {f: 0.0 for f in _FINGER_NAMES}
 _DEFAULT_SERVO_ANGLES = {f: config.SERVO_MIN[f] for f in _FINGER_NAMES}
+
+
+def apply_servo_deadband(new_angles: dict, stable_angles: dict) -> dict:
+    """
+    Per-servo output deadband filter (anti-shaking).
+    Only updates a servo's angle if it changed by more than SERVO_DEADBAND_DEGREES
+    from the last stable output. Returns the filtered angles dict and updates
+    stable_angles in-place.
+    """
+    deadband = getattr(config, 'SERVO_DEADBAND_DEGREES', 3)
+    if deadband <= 0:
+        stable_angles.update(new_angles)
+        return dict(new_angles)
+
+    result = {}
+    for ch in new_angles:
+        new_val = new_angles[ch]
+        old_val = stable_angles.get(ch)
+        if old_val is None or abs(new_val - old_val) >= deadband:
+            # Movement is large enough — accept the new angle
+            stable_angles[ch] = new_val
+            result[ch] = new_val
+        else:
+            # Jitter — hold the last stable angle
+            result[ch] = old_val
+    return result
 
 
 # ---- Grip Protection State ----
@@ -570,8 +597,7 @@ def main():
     print(f"[INIT] Connecting to ESP32 ({config.COMM_MODE})...")
     if client.connect():
         print("[INIT] ESP32 connection established!")
-        # Sync configuration and grip strength
-        client.sync_config()
+        # Send grip strength to ESP32
         client.set_grip_strength(int(grip.get_strength()))
         # Send a ping to verify
         if client.ping():
@@ -612,6 +638,7 @@ def main():
         'quit_requested': False,
         'curls': {f: 0.0 for f in ["thumb", "index", "middle", "ring", "pinky"]},
         'servo_angles': {f: config.SERVO_MIN[f] for f in ["thumb", "index", "middle", "ring", "pinky"]},
+        'stable_servo_angles': {},  # Anti-shaking: last committed angle per servo
     }
     prev_time = time.perf_counter()
     window_created = False
@@ -669,7 +696,6 @@ def main():
                 print("[INFO] Reconnecting to ESP32 via mouse click...")
                 client.disconnect()
                 if client.connect():
-                    client.sync_config()
                     client.set_grip_strength(int(grip.get_strength()))
                     print("[INFO] Reconnected!")
                 else:
@@ -717,6 +743,10 @@ def main():
                 # Save live values so that mouse click can capture them
                 state['curls'] = curls
                 state['servo_angles'] = servo_angles
+
+            # Anti-shaking: per-servo output deadband filter
+            # Only update a servo if it moved significantly from its last stable position
+            servo_angles = apply_servo_deadband(servo_angles, state['stable_servo_angles'])
 
             # Send to ESP32 (if not paused)
             if not state['paused']:
