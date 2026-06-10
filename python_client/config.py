@@ -1,6 +1,35 @@
 """
 Configuration for InMoov Hand Gesture Control System.
 Adjust these values to match your hardware setup.
+
+References:
+  Hardware:
+    - ESP32 DevKit 30P Datasheet & Pinout:
+        https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf
+    - PCA9685 16-Ch PWM Driver Datasheet (NXP):
+        https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf
+    - MG996R Servo Datasheet (Tower Pro):
+        https://www.electronicoscaldas.com/datasheet/MG996R_Tower-Pro.pdf
+    - Adafruit PCA9685 Breakout Guide:
+        https://learn.adafruit.com/16-channel-pwm-servo-driver/overview
+    - InMoov Open-Source Robot Platform:
+        https://inmoov.fr/
+
+  Software / Libraries:
+    - MediaPipe Hand Landmarker (Tasks API):
+        https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker
+    - MediaPipe Hand Landmark Model Card:
+        https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Hand%20Tracking%20(Lite_Full).pdf
+    - OpenCV-Python Documentation:
+        https://docs.opencv.org/4.x/
+    - PySerial Documentation:
+        https://pyserial.readthedocs.io/en/latest/
+
+  Algorithms:
+    - Exponential Moving Average (EMA) Filter:
+        https://en.wikipedia.org/wiki/Exponential_smoothing
+    - Servo PWM Deadband / Anti-Jitter Techniques:
+        https://www.servocity.com/how-do-servos-work/
 """
 
 # =============================================================================
@@ -8,14 +37,14 @@ Adjust these values to match your hardware setup.
 # =============================================================================
 
 # Communication mode: "serial" or "wifi"
-COMM_MODE = "serial"
+COMM_MODE = "wifi"
 
 # --- Serial Settings (for wired USB connection) ---
 SERIAL_PORT = "COM6"        # Change to your ESP32's COM port (check Device Manager)
 SERIAL_BAUD = 115200
 
 # --- WiFi Settings (for wireless TCP connection) ---
-ESP32_IP = "192.168.1.100"  # Change to your ESP32's IP (printed on Serial Monitor)
+ESP32_IP = "192.168.1.61"  # Change to your ESP32's IP (printed on Serial Monitor)
 ESP32_PORT = 8080
 
 # =============================================================================
@@ -112,22 +141,22 @@ SERVO_CHANNELS = {
 
 # Servo angle when finger is fully OPEN (extended)
 SERVO_MIN = {
-    "thumb":  90,
-    "index":  90,
-    "middle": 90,
-    "ring":   90,
-    "pinky":  90,
-    "wrist":  90,
-}
+    "thumb":  0,
+    "index":  0,
+    "middle": 0,
+    "ring":   0,
+    "pinky":  0,
+    "wrist":  90}
+
 
 # Servo angle when finger is fully CLOSED (curled)
 SERVO_MAX = {
     "thumb":  180,
     "index":  180,
-    "middle": 180,
+    "middle": 170,
     "ring":   180,
-    "pinky":  180,
-    "wrist":  180,
+    "pinky":  170,
+    "wrist":  180
 }
 
 # Set True if a servo rotates in the opposite direction from expected

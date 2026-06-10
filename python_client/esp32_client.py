@@ -7,6 +7,29 @@ Protocol:
     C<channel>,<angle>\n                                   — Set single servo (calibration)
     P\n                                                    — Ping (expects "PONG\n")
     S\n                                                    — Query status
+
+References:
+  Serial Communication:
+    - PySerial Library Documentation:
+        https://pyserial.readthedocs.io/en/latest/
+    - PySerial API Reference (Serial class):
+        https://pyserial.readthedocs.io/en/latest/pyserial_api.html
+    - ESP32 UART/USB-Serial (CH340 driver):
+        https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/uart.html
+
+  TCP/WiFi Communication:
+    - Python socket module — TCP client programming:
+        https://docs.python.org/3/library/socket.html
+    - TCP_NODELAY / Nagle's algorithm (low-latency real-time control):
+        https://en.wikipedia.org/wiki/Nagle%27s_algorithm
+    - ESP32 WiFi TCP Server (Arduino WiFi library):
+        https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html
+
+  Design Patterns:
+    - Python ABC (Abstract Base Classes) — BaseClient pattern:
+        https://docs.python.org/3/library/abc.html
+    - Rate limiting / token bucket (send rate control):
+        https://en.wikipedia.org/wiki/Token_bucket
 """
 
 import time

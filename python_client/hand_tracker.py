@@ -5,6 +5,35 @@ curl percentages (0% = open, 100% = fully closed).
 
 Uses the new MediaPipe Tasks API (0.10.14+), which replaces the
 deprecated mp.solutions.hands interface.
+
+References:
+  MediaPipe Hand Tracking:
+    - Hand Landmarker Guide (Tasks API):
+        https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker
+    - 21-Point Hand Landmark Model — index definitions & topology:
+        https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker#models
+    - MediaPipe Tasks Python API Reference:
+        https://developers.google.com/mediapipe/api/solutions/python/mp/tasks/vision
+    - Hand Landmark Model Card (accuracy, architecture):
+        https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Hand%20Tracking%20(Lite_Full).pdf
+
+  Hand Anatomy (joint naming & motion ranges):
+    - Finger joint nomenclature (CMC, MCP, PIP, DIP, IP):
+        https://en.wikipedia.org/wiki/Interphalangeal_joints_of_the_hand
+    - Thumb opposition vs. flexion — why a hybrid method is needed:
+        https://en.wikipedia.org/wiki/Thumb#Opposition
+
+  Math Foundations:
+    - Dot-product angle formula (joint angle computation):
+        https://en.wikipedia.org/wiki/Dot_product#Geometric_definition
+    - Gram-Schmidt orthogonalisation (wrist rotation reference frame):
+        https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process
+    - atan2 for quadrant-aware angle extraction:
+        https://en.wikipedia.org/wiki/Atan2
+    - Exponential Moving Average (EMA) smoothing:
+        https://en.wikipedia.org/wiki/Exponential_smoothing
+    - Velocity-adaptive smoothing (concept):
+        https://www.sciencedirect.com/topics/engineering/adaptive-filter
 """
 
 import os

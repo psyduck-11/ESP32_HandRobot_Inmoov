@@ -6,6 +6,25 @@ Controls:
     1-6: Select servo    O: Set OPEN (min)    C: Set CLOSED (max)
     I: Toggle invert     T: Test selected     A: Test all (wave)
     S: Save calibration  Q: Quit
+
+References:
+  OpenCV GUI:
+    - OpenCV Trackbar (createTrackbar) for interactive slider control:
+        https://docs.opencv.org/4.x/d7/dfc/group__highgui.html#ga586fba65ce4f13a4c7e1df19cbcac05e
+    - OpenCV HighGUI window management:
+        https://docs.opencv.org/4.x/d7/dfc/group__highgui.html
+
+  Servo Calibration:
+    - MG996R Servo Datasheet (pulse range 500–2500 µs, 0–180°):
+        https://www.electronicoscaldas.com/datasheet/MG996R_Tower-Pro.pdf
+    - Servo calibration methodology (finding mechanical limits):
+        https://www.servocity.com/how-do-servos-work/
+    - PCA9685 channel mapping (Adafruit guide):
+        https://learn.adafruit.com/16-channel-pwm-servo-driver/library-reference
+
+  Data Persistence:
+    - Python JSON module (saving/loading calibration_data.json):
+        https://docs.python.org/3/library/json.html
 """
 
 import sys

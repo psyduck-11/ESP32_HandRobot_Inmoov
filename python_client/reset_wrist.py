@@ -7,6 +7,14 @@ Usage:
 
 Connects to the ESP32 using the settings in config.py (serial or WiFi),
 sends the angle command for the wrist channel only, then exits.
+
+References:
+    - MG996R Servo Datasheet (operating range 0–180°):
+        https://www.electronicoscaldas.com/datasheet/MG996R_Tower-Pro.pdf
+    - PCA9685 Single-Channel Control (Adafruit library):
+        https://learn.adafruit.com/16-channel-pwm-servo-driver/library-reference
+    - InMoov Wrist Mechanism:
+        https://inmoov.fr/hand-and-forarm/
 """
 
 import sys

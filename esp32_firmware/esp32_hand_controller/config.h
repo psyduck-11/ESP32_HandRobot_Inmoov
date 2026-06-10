@@ -1,6 +1,45 @@
 /*
  * InMoov Hand Controller — ESP32 Configuration
  * Adjust these values for your hardware setup.
+ *
+ * References:
+ *   Hardware Datasheets:
+ *     - ESP32 Technical Reference Manual:
+ *         https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf
+ *     - ESP32 Datasheet (pinout, electrical characteristics):
+ *         https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf
+ *     - PCA9685 16-Ch 12-bit PWM Driver Datasheet (NXP):
+ *         https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf
+ *     - MG996R Metal Gear Servo Datasheet (Tower Pro):
+ *         https://www.electronicoscaldas.com/datasheet/MG996R_Tower-Pro.pdf
+ *     - Adafruit PCA9685 Breakout Guide (wiring, I2C address):
+ *         https://learn.adafruit.com/16-channel-pwm-servo-driver/overview
+ *
+ *   PWM / Servo Timing:
+ *     - PCA9685 PWM frequency and resolution (50 Hz, 12-bit = 4096 ticks):
+ *         See PCA9685 datasheet Section 7.3.5, "PRE_SCALE register"
+ *     - MG996R pulse width range (500–2500 µs):
+ *         See MG996R datasheet "Control System" section
+ *     - Servo PWM fundamentals:
+ *         https://www.servocity.com/how-do-servos-work/
+ *
+ *   I2C Protocol:
+ *     - ESP32 I2C Master (Wire library, SDA=GPIO21, SCL=GPIO22):
+ *         https://docs.espressif.com/projects/arduino-esp32/en/latest/api/i2c.html
+ *     - I2C Fast Mode (400 kHz):
+ *         https://www.nxp.com/docs/en/user-guide/UM10204.pdf
+ *
+ *   WiFi:
+ *     - ESP32 Arduino WiFi library:
+ *         https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html
+ *     - ESP32 WiFi modes (Station mode for this project):
+ *         https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+ *
+ *   Current Sensing (optional):
+ *     - ESP32 ADC (12-bit, GPIO34 input-only, attenuation):
+ *         https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc_oneshot.html
+ *     - INA219 Current Sensor Breakout (Adafruit):
+ *         https://learn.adafruit.com/adafruit-ina219-current-sensor-breakout
  */
 
 #ifndef CONFIG_H
@@ -9,12 +48,12 @@
 // =============================================================================
 //  WiFi Settings (for wireless mode)
 // =============================================================================
-#define WIFI_SSID     "YOUR_WIFI_SSID"        // Change to your WiFi network name
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"      // Change to your WiFi password
+#define WIFI_SSID     "Hai Anh"        // Change to your WiFi network name
+#define WIFI_PASSWORD "11112007"      // Change to your WiFi password
 #define TCP_PORT      8080                      // TCP server port
 
 // Set to true to enable WiFi TCP server (in addition to Serial)
-#define ENABLE_WIFI   false
+#define ENABLE_WIFI   true
 
 // =============================================================================
 //  I2C & PCA9685 Settings

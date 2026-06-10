@@ -12,6 +12,33 @@ Controls:
     Space   — Toggle wrist control on/off
     G       — Cycle grip mode (DELICATE → LIGHT → NORMAL → FIRM)
     +/-     — Fine-adjust grip strength ±5%
+
+References:
+  OpenCV (UI & Video Capture):
+    - OpenCV-Python VideoCapture:
+        https://docs.opencv.org/4.x/d8/dfe/classcv_1_1VideoCapture.html
+    - OpenCV HighGUI (imshow, waitKey, setMouseCallback):
+        https://docs.opencv.org/4.x/d7/dfc/group__highgui.html
+    - OpenCV Drawing Functions (rectangle, circle, putText, line):
+        https://docs.opencv.org/4.x/d6/d6e/group__imgproc__draw.html
+    - Alpha blending / compositing for transparent overlays:
+        https://docs.opencv.org/4.x/d5/dc4/tutorial_adding_images.html
+
+  Grip Protection & Servo Control:
+    - Cosine easing function (compliance zone deceleration):
+        https://easings.net/#easeInOutSine
+    - Linear interpolation (lerp) with clamping:
+        https://en.wikipedia.org/wiki/Linear_interpolation
+    - Servo deadband filtering (anti-jitter technique):
+        https://www.servocity.com/how-do-servos-work/
+
+  Real-Time Control Loop Design:
+    - time.perf_counter() for high-resolution timing on Windows:
+        https://docs.python.org/3/library/time.html#time.perf_counter
+    - Smoothed FPS calculation (EMA-based frame rate):
+        https://en.wikipedia.org/wiki/Exponential_smoothing
+    - InMoov project documentation (hand kinematics):
+        https://inmoov.fr/hand-and-forarm/
 """
 
 import sys
@@ -597,6 +624,8 @@ def main():
     print(f"[INIT] Connecting to ESP32 ({config.COMM_MODE})...")
     if client.connect():
         print("[INIT] ESP32 connection established!")
+        # Sync safety configuration (Inversion, Min, Max)
+        client.sync_config()
         # Send grip strength to ESP32
         client.set_grip_strength(int(grip.get_strength()))
         # Send a ping to verify
@@ -696,6 +725,7 @@ def main():
                 print("[INFO] Reconnecting to ESP32 via mouse click...")
                 client.disconnect()
                 if client.connect():
+                    client.sync_config()
                     client.set_grip_strength(int(grip.get_strength()))
                     print("[INFO] Reconnected!")
                 else:

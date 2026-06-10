@@ -1,4 +1,19 @@
+# OpenCV-Python — Computer vision, webcam capture, and GUI overlay rendering
+# PyPI: https://pypi.org/project/opencv-python/
+# Docs: https://docs.opencv.org/4.x/
 opencv-python>=4.8.0
+
+# MediaPipe — Google's ML framework for hand landmark detection (Tasks API)
+# PyPI: https://pypi.org/project/mediapipe/
+# Guide: https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker
 mediapipe>=0.10.0
+
+# NumPy — Numerical computing (array ops for image processing)
+# PyPI: https://pypi.org/project/numpy/
+# Docs: https://numpy.org/doc/stable/
 numpy>=1.24.0
+
+# PySerial — Serial port communication with ESP32 over USB
+# PyPI: https://pypi.org/project/pyserial/
+# Docs: https://pyserial.readthedocs.io/en/latest/
 pyserial>=3.5

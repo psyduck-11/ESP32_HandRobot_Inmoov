@@ -16,6 +16,50 @@
  *    PCA9685 16-ch PWM driver on I2C (SDA=21, SCL=22)
  *    6x MG996R servos on channels 0-5
  *    5V 20A Adapter on PCA9685 V+
+ *
+ *  References:
+ *    Libraries:
+ *      - Adafruit PWM Servo Driver Library (PCA9685 I2C control):
+ *          https://github.com/adafruit/Adafruit-PWM-Servo-Driver-Library
+ *          https://learn.adafruit.com/16-channel-pwm-servo-driver/library-reference
+ *      - Arduino Wire Library (I2C master):
+ *          https://www.arduino.cc/reference/en/language/functions/communication/wire/
+ *      - ESP32 Arduino Core:
+ *          https://docs.espressif.com/projects/arduino-esp32/en/latest/
+ *
+ *    WiFi / Networking:
+ *      - ESP32 WiFi Library (Station mode, TCP server):
+ *          https://docs.espressif.com/projects/arduino-esp32/en/latest/api/wifi.html
+ *      - WiFiServer & WiFiClient API:
+ *          https://www.arduino.cc/reference/en/libraries/wifi/
+ *      - TCP_NODELAY / Nagle's algorithm (setNoDelay for low-latency):
+ *          https://en.wikipedia.org/wiki/Nagle%27s_algorithm
+ *
+ *    Servo Control Theory:
+ *      - PWM-to-angle mapping (PCA9685 12-bit ticks → µs → degrees):
+ *          See PCA9685 datasheet Section 7.3.5
+ *          https://www.nxp.com/docs/en/data-sheet/PCA9685.pdf
+ *      - Smooth servo interpolation (rate-limited position stepping):
+ *          https://www.arduino.cc/reference/en/language/functions/math/constrain/
+ *      - Compliance zone / soft-landing approach (preventing grip crush):
+ *          Inspired by robotic gripper force-control literature
+ *          https://en.wikipedia.org/wiki/Impedance_control
+ *
+ *    Stall/Current Detection (optional):
+ *      - ESP32 ADC (analogRead, 12-bit resolution):
+ *          https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc_oneshot.html
+ *      - Motor stall detection via current sensing:
+ *          https://learn.adafruit.com/adafruit-ina219-current-sensor-breakout
+ *
+ *    Serial Communication:
+ *      - Arduino Serial (UART at 115200 baud):
+ *          https://www.arduino.cc/reference/en/language/functions/communication/serial/
+ *      - strtok() for command parsing (C standard library):
+ *          https://en.cppreference.com/w/c/string/byte/strtok
+ *
+ *    InMoov Project:
+ *      - InMoov open-source robot (hand & forearm design):
+ *          https://inmoov.fr/hand-and-forarm/
  * ============================================================
  */
 
@@ -41,9 +85,14 @@ unsigned long lastUpdateTime = 0;
 unsigned long lastLedToggle = 0;
 bool ledState = false;
 
+// ---- Safety Configurations synced from Python ----
+bool safetyInverted[NUM_SERVOS] = {false, false, false, false, false, false};
+int safetyMin[NUM_SERVOS] = {ANGLE_MIN, ANGLE_MIN, ANGLE_MIN, ANGLE_MIN, ANGLE_MIN, ANGLE_MIN};
+int safetyMax[NUM_SERVOS] = {ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX};
+
 // ---- Grip Protection ----
 int gripStrength = 100;        // 0-100% — limits max closing angle
-int maxServoAngle[NUM_SERVOS]; // Computed max angle per servo based on grip
+int gripLimitAngle[NUM_SERVOS] = {ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX, ANGLE_MAX}; // Computed target limit angle per servo based on grip
 bool stallDetected[NUM_SERVOS] = {false};
 
 #if ENABLE_CURRENT_SENSE
@@ -87,8 +136,16 @@ void updateServos() {
   for (int i = 0; i < NUM_SERVOS; i++) {
     // Apply grip strength limit: cap target angle
     int effectiveTarget = targetAngle[i];
-    if (effectiveTarget > maxServoAngle[i]) {
-      effectiveTarget = maxServoAngle[i];
+    if (safetyInverted[i]) {
+      // Inverted: closing means angle decreases. Cap target at gripLimitAngle (lower bound).
+      if (effectiveTarget < gripLimitAngle[i]) {
+        effectiveTarget = gripLimitAngle[i];
+      }
+    } else {
+      // Normal: closing means angle increases. Cap target at gripLimitAngle (upper bound).
+      if (effectiveTarget > gripLimitAngle[i]) {
+        effectiveTarget = gripLimitAngle[i];
+      }
     }
 
     // Fast-path skip: don't evaluate if already at target or stalled
@@ -109,12 +166,14 @@ void updateServos() {
 #if SERVO_SPEED_LIMIT > 0
     int speedLimit = SERVO_SPEED_LIMIT;
 
-    // Apply compliance when closing (diff > 0)
-    if (diff > 0 && COMPLIANCE_ZONE_DEG > 0) {
-      if (diff <= COMPLIANCE_ZONE_DEG) {
+    // Apply compliance when closing
+    bool isClosing = (safetyInverted[i] && diff < 0) || (!safetyInverted[i] && diff > 0);
+    if (isClosing && COMPLIANCE_ZONE_DEG > 0) {
+      int absDiff = abs(diff);
+      if (absDiff <= COMPLIANCE_ZONE_DEG) {
         // Linearly reduce speed as we approach the target
         int scaledSpeed = COMPLIANCE_MIN_SPEED + 
-          (diff * (SERVO_SPEED_LIMIT - COMPLIANCE_MIN_SPEED)) / COMPLIANCE_ZONE_DEG;
+          (absDiff * (SERVO_SPEED_LIMIT - COMPLIANCE_MIN_SPEED)) / COMPLIANCE_ZONE_DEG;
         speedLimit = scaledSpeed > COMPLIANCE_MIN_SPEED ? scaledSpeed : COMPLIANCE_MIN_SPEED;
       }
     }
@@ -128,8 +187,10 @@ void updateServos() {
     currentAngle[i] += diff;
     
     // Failsafe bound check
-    if (currentAngle[i] < ANGLE_MIN) currentAngle[i] = ANGLE_MIN;
-    else if (currentAngle[i] > ANGLE_MAX) currentAngle[i] = ANGLE_MAX;
+    int low = safetyMin[i] < safetyMax[i] ? safetyMin[i] : safetyMax[i];
+    int high = safetyMin[i] > safetyMax[i] ? safetyMin[i] : safetyMax[i];
+    if (currentAngle[i] < low) currentAngle[i] = low;
+    else if (currentAngle[i] > high) currentAngle[i] = high;
     
     setServoImmediate(servoChannels[i], currentAngle[i]);
   }
@@ -145,9 +206,14 @@ void updateServos() {
  */
 void updateGripLimits() {
   for (int i = 0; i < NUM_SERVOS; i++) {
-    // Map grip strength to max angle
-    // At 100%: ANGLE_MAX (full range). At 0%: ANGLE_MIN (can't close at all).
-    maxServoAngle[i] = map(gripStrength, 0, 100, ANGLE_MIN, ANGLE_MAX);
+    // Map grip strength to angle limits based on safety config
+    if (safetyInverted[i]) {
+      // Inverted: open is safetyMax[i] (larger angle), closed is safetyMin[i] (smaller angle)
+      gripLimitAngle[i] = map(gripStrength, 0, 100, safetyMax[i], safetyMin[i]);
+    } else {
+      // Normal: open is safetyMin[i] (smaller angle), closed is safetyMax[i] (larger angle)
+      gripLimitAngle[i] = map(gripStrength, 0, 100, safetyMin[i], safetyMax[i]);
+    }
     // Clear stall flag when grip changes
     stallDetected[i] = false;
   }
@@ -175,10 +241,18 @@ void checkCurrentStall() {
       Serial.print(adcVal);
       Serial.println(" — backing off");
       for (int i = 0; i < NUM_SERVOS; i++) {
-        if (currentAngle[i] > ANGLE_MIN) {
-          int backoffTarget = currentAngle[i] - STALL_BACKOFF_DEG;
-          targetAngle[i] = backoffTarget > ANGLE_MIN ? backoffTarget : ANGLE_MIN;
-          stallDetected[i] = true;
+        if (safetyInverted[i]) {
+          if (currentAngle[i] < safetyMax[i]) {
+            int backoffTarget = currentAngle[i] + STALL_BACKOFF_DEG;
+            targetAngle[i] = backoffTarget < safetyMax[i] ? backoffTarget : safetyMax[i];
+            stallDetected[i] = true;
+          }
+        } else {
+          if (currentAngle[i] > safetyMin[i]) {
+            int backoffTarget = currentAngle[i] - STALL_BACKOFF_DEG;
+            targetAngle[i] = backoffTarget > safetyMin[i] ? backoffTarget : safetyMin[i];
+            stallDetected[i] = true;
+          }
         }
       }
       stallCounter = 0;
@@ -231,7 +305,9 @@ void processCommand(char* cmd, Print& output) {
 
     if (idx == NUM_SERVOS) {
       for (int i = 0; i < NUM_SERVOS; i++) {
-        targetAngle[i] = constrain(vals[i], ANGLE_MIN, ANGLE_MAX);
+        int low = safetyMin[i] < safetyMax[i] ? safetyMin[i] : safetyMax[i];
+        int high = safetyMin[i] > safetyMax[i] ? safetyMin[i] : safetyMax[i];
+        targetAngle[i] = constrain(vals[i], low, high);
       }
       output.print("OK\n");
     } else {
@@ -286,6 +362,75 @@ void processCommand(char* cmd, Print& output) {
     char resp[16];
     snprintf(resp, sizeof(resp), "OK:G%d\n", gripStrength);
     output.print(resp);
+    break;
+  }
+
+  case 'I':
+  case 'i': {
+    // I<inv_thumb>,<inv_index>,<inv_middle>,<inv_ring>,<inv_pinky>,<inv_wrist>
+    int vals[NUM_SERVOS];
+    int idx = 0;
+    char* token = strtok(data, ",");
+    while (token != NULL && idx < NUM_SERVOS) {
+      vals[idx++] = atoi(token);
+      token = strtok(NULL, ",");
+    }
+
+    if (idx == NUM_SERVOS) {
+      for (int i = 0; i < NUM_SERVOS; i++) {
+        safetyInverted[i] = (vals[i] != 0);
+      }
+      updateGripLimits();
+      output.print("OK\n");
+    } else {
+      output.print("E:INVALID_ARGS\n");
+    }
+    break;
+  }
+
+  case 'M':
+  case 'm': {
+    // M<min_thumb>,<min_index>,...
+    int vals[NUM_SERVOS];
+    int idx = 0;
+    char* token = strtok(data, ",");
+    while (token != NULL && idx < NUM_SERVOS) {
+      vals[idx++] = atoi(token);
+      token = strtok(NULL, ",");
+    }
+
+    if (idx == NUM_SERVOS) {
+      for (int i = 0; i < NUM_SERVOS; i++) {
+        safetyMin[i] = vals[i];
+      }
+      updateGripLimits();
+      output.print("OK\n");
+    } else {
+      output.print("E:INVALID_ARGS\n");
+    }
+    break;
+  }
+
+  case 'X':
+  case 'x': {
+    // X<max_thumb>,<max_index>,...
+    int vals[NUM_SERVOS];
+    int idx = 0;
+    char* token = strtok(data, ",");
+    while (token != NULL && idx < NUM_SERVOS) {
+      vals[idx++] = atoi(token);
+      token = strtok(NULL, ",");
+    }
+
+    if (idx == NUM_SERVOS) {
+      for (int i = 0; i < NUM_SERVOS; i++) {
+        safetyMax[i] = vals[i];
+      }
+      updateGripLimits();
+      output.print("OK\n");
+    } else {
+      output.print("E:INVALID_ARGS\n");
+    }
     break;
   }
 

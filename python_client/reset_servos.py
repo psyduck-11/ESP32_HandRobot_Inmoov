@@ -6,6 +6,14 @@ Usage:
 
 Connects to the ESP32 using the settings in config.py (serial or WiFi),
 sends the NEUTRAL_ANGLE command for all finger channels, then exits.
+
+References:
+    - MG996R Servo Datasheet (neutral position / center pulse):
+        https://www.electronicoscaldas.com/datasheet/MG996R_Tower-Pro.pdf
+    - PCA9685 I2C PWM Driver (Adafruit library reference):
+        https://learn.adafruit.com/16-channel-pwm-servo-driver/library-reference
+    - ESP32 Serial Communication (PySerial):
+        https://pyserial.readthedocs.io/en/latest/
 """
 
 from numpy._typing import _nested_sequence
@@ -19,7 +27,7 @@ import config
 from esp32_client import create_client
 
 
-NEUTRAL_ANGLE = 90
+NEUTRAL_ANGLE = 0
 
 
 
@@ -53,7 +61,8 @@ def main():
         "index":  NEUTRAL_ANGLE,
         "middle": NEUTRAL_ANGLE,
         "ring":   NEUTRAL_ANGLE,
-        "pinky":  NEUTRAL_ANGLE
+        "pinky":  NEUTRAL_ANGLE,
+        "wrist": 90
     }
 
     # Send all servos to neutral using the public API with force=True
