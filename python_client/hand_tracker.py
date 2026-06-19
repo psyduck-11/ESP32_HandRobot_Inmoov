@@ -470,6 +470,13 @@ class HandTracker:
             cv2.circle(frame_bgr, (px, py), radius, color, -1, cv2.LINE_AA)
             cv2.circle(frame_bgr, (px, py), radius, (255, 255, 255), 1, cv2.LINE_AA)
 
+            # Draw landmark index number (0–20)
+            label = str(i)
+            cv2.putText(frame_bgr, label, (px + radius + 2, py - radius + 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame_bgr, label, (px + radius + 2, py - radius + 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv2.LINE_AA)
+
         return frame_bgr
 
     def release(self):
